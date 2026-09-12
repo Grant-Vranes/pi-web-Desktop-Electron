@@ -25,8 +25,6 @@ import { AgentSessionPanel } from "./AgentSessionPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
 import { useTheme } from "@/hooks/useTheme";
-import { THEME_OPTIONS } from "@/lib/theme";
-import { ThemeIcon } from "./ThemeIcon";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile, useIsNarrowMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
@@ -78,7 +76,6 @@ type AutoNameStatus =
   | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
-const SELECTION_MENU_WIDTH = 176;
 const AGENT_PANEL_WIDTH = 420;
 
 function TopBarFontButton({
@@ -138,9 +135,9 @@ export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
-  const { preference, setThemePreference } = useTheme();
-  const themeLabelKey = `theme.${preference}`;
-  const { locale, setLocale, t: translate, supportedLocales } = useI18n();
+  // Keep the system-theme subscription mounted for the lifetime of the app.
+  useTheme();
+  const { locale, t: translate } = useI18n();
   const { scale: chatFontScale, adjust: adjustChatFont, reset: resetChatFont } = useChatFontScale();
   const isMobile = useIsMobile();
   const isNarrowMobile = useIsNarrowMobile();
@@ -227,7 +224,7 @@ export function AppShell() {
   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
   const [projectTrustError, setProjectTrustError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => !initialNavigation.sidebarCollapsed);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
@@ -301,10 +298,6 @@ export function AppShell() {
   const [pendingQuotePrompt, setPendingQuotePrompt] = useState<{ sessionId: string; text: string } | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
   const mobileToolbarRef = useRef<HTMLDivElement>(null);
-  const themeBtnRef = useRef<HTMLButtonElement>(null);
-  const languageBtnRef = useRef<HTMLButtonElement>(null);
-  const selectionMenuRef = useRef<HTMLDivElement>(null);
-
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
   const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
@@ -376,7 +369,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "language" | "theme" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -392,7 +385,7 @@ export function AppShell() {
   }, [hasSubagentSessions]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session" | "language" | "theme",
+    panel: "agents" | "branches" | "system" | "tools" | "session",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -456,12 +449,10 @@ export function AppShell() {
     const handlePointerDown = (event: PointerEvent) => {
       const toolbar = mobileToolbarRef.current;
       if (toolbar && event.composedPath().includes(toolbar)) return;
-      // An open selector dismisses both layers together.
-      if (selectionMenuRef.current) return;
       setMobileToolbarMoreOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || selectionMenuRef.current) return;
+      if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
       setMobileToolbarMoreOpen(false);
@@ -479,63 +470,10 @@ export function AppShell() {
     setMobileToolbarMoreOpen(false);
   }, [isMobile, isNarrowMobile, selectedSession?.id, newSessionDraftId]);
 
-  useLayoutEffect(() => {
-    if (activeTopPanel !== "theme" && activeTopPanel !== "language") return;
-    const menu = selectionMenuRef.current;
-    const trigger = activeTopPanel === "theme" ? themeBtnRef.current : languageBtnRef.current;
-    if (!menu || !trigger) return;
-    const items = Array.from(menu.querySelectorAll<HTMLButtonElement>("[role=menuitemradio]"));
-    (items.find((item) => item.getAttribute("aria-checked") === "true") ?? items[0])?.focus();
-
-    const dismissOutside = (event: Event) => {
-      if (event.composedPath().includes(menu) || event.composedPath().includes(trigger)) return;
-      setActiveTopPanel(null);
-      const toolbar = mobileToolbarRef.current;
-      if (event.type === "pointerdown" && (!toolbar || !event.composedPath().includes(toolbar))) {
-        setMobileToolbarMoreOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        trigger.focus();
-        setActiveTopPanel(null);
-        return;
-      }
-      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const index = items.indexOf(document.activeElement as HTMLButtonElement);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
-        : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-      items[next]?.focus();
-    };
-    document.addEventListener("pointerdown", dismissOutside, true);
-    document.addEventListener("focusin", dismissOutside);
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", dismissOutside, true);
-      document.removeEventListener("focusin", dismissOutside);
-      document.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [activeTopPanel, topPanelPos]);
-
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
     const update = () => {
       const topBarRect = topBarRef.current!.getBoundingClientRect();
-      if ((activeTopPanel === "language" || activeTopPanel === "theme") && !isMobile) {
-        const button = activeTopPanel === "theme" ? themeBtnRef.current : languageBtnRef.current;
-        if (!button) return;
-        const buttonRect = button.getBoundingClientRect();
-        const width = Math.min(SELECTION_MENU_WIDTH, topBarRect.width);
-        const left = Math.min(
-          buttonRect.left - 1,
-          Math.max(topBarRect.left, topBarRect.right - width),
-        );
-        setTopPanelPos({ top: topBarRect.bottom, left, width });
-        return;
-      }
       if (activeTopPanel === "agents") {
         setTopPanelPos({
           top: topBarRect.bottom,
@@ -549,8 +487,6 @@ export function AppShell() {
     update();
     const ro = new ResizeObserver(update);
     ro.observe(topBarRef.current);
-    if (languageBtnRef.current) ro.observe(languageBtnRef.current);
-    if (themeBtnRef.current) ro.observe(themeBtnRef.current);
     return () => ro.disconnect();
   }, [activeTopPanel, isMobile]);
 
@@ -1440,77 +1376,6 @@ export function AppShell() {
     </>
   );
 
-  const renderThemeButton = (mobile: boolean) => (
-    <button
-      ref={themeBtnRef}
-      type="button"
-      onClick={() => toggleTopPanel("theme", mobile)}
-      title={translate(themeLabelKey)}
-      aria-label={translate(themeLabelKey)}
-      aria-haspopup="menu"
-      aria-expanded={activeTopPanel === "theme"}
-      aria-pressed={activeTopPanel === "theme"}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-        background: activeTopPanel === "theme" ? "var(--bg-selected)" : "none",
-        border: "none", borderRight: "1px solid var(--border)",
-        color: activeTopPanel === "theme" ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(event) => { event.currentTarget.style.color = activeTopPanel === "theme" ? "var(--text)" : "var(--text-muted)"; }}
-      data-mobile-toolbar-action={mobile ? "theme" : undefined}
-    >
-      <ThemeIcon preference={preference} size={16} />
-    </button>
-  );
-
-  const renderLanguageButton = (mobile: boolean) => (
-    <button
-      ref={languageBtnRef}
-      type="button"
-      onClick={() => toggleTopPanel("language", mobile)}
-      title={translate("common.language")}
-      aria-label={translate("common.language")}
-      aria-haspopup="menu"
-      aria-expanded={activeTopPanel === "language"}
-      aria-pressed={activeTopPanel === "language"}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-        background: activeTopPanel === "language" ? "var(--bg-selected)" : "none",
-        border: "none", borderRight: "1px solid var(--border)",
-        color: activeTopPanel === "language" ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.color = activeTopPanel === "language" ? "var(--text)" : "var(--text-muted)";
-      }}
-      data-mobile-toolbar-action={mobile ? "language" : undefined}
-    >
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="m5 8 6 6" />
-        <path d="m4 14 6-6 2-3" />
-        <path d="M2 5h12" />
-        <path d="M7 2h1" />
-        <path d="m22 22-5-10-5 10" />
-        <path d="M14 18h6" />
-      </svg>
-    </button>
-  );
-
   const renderProjectTrustWarning = (mobileBanner: boolean) => {
     if (!showChat || !projectTrust?.requiresTrust || projectTrust.trusted) return null;
     return (
@@ -1968,8 +1833,6 @@ export function AppShell() {
             </TopBarFontButton>
           </div>
         )}
-        {mobile && renderThemeButton(true)}
-        {mobile && renderLanguageButton(true)}
       </div>
     );
   };
@@ -2413,8 +2276,6 @@ export function AppShell() {
           )}
           {!isMobile && (
             <>
-              {renderThemeButton(false)}
-              {renderLanguageButton(false)}
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}
@@ -2450,97 +2311,6 @@ export function AppShell() {
               overflowY: "auto",
               zIndex: 500,
             }}>
-              {activeTopPanel === "language" && (
-                <div
-                  ref={selectionMenuRef}
-                  role="menu"
-                  aria-label={translate("common.language")}
-                  style={{
-                    background: "var(--bg-panel)",
-                    borderLeft: "1px solid var(--border)",
-                    borderRight: "1px solid var(--border)",
-                    borderBottom: "1px solid var(--border)",
-                    overflow: "hidden",
-                    padding: 4,
-                  }}
-                >
-                  {supportedLocales.map((plugin) => (
-                    <button
-                      key={plugin.id}
-                      type="button"
-                      onClick={() => {
-                        setLocale(plugin.id as typeof locale);
-                        languageBtnRef.current?.focus();
-                        setActiveTopPanel(null);
-                      }}
-                      role="menuitemradio"
-                      aria-checked={locale === plugin.id}
-                      style={{
-                        display: "flex", alignItems: "center",
-                        width: "100%", height: 34, padding: "0 10px",
-                        border: "none", borderRadius: 4,
-                        background: locale === plugin.id ? "var(--bg-selected)" : "transparent",
-                        color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
-                        transition: "background 0.1s",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (locale !== plugin.id) e.currentTarget.style.background = "var(--bg-hover)";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (locale !== plugin.id) e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <span>{plugin.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {activeTopPanel === "theme" && (
-                <div
-                  ref={selectionMenuRef}
-                  role="menu"
-                  aria-label={translate("settings.appearance")}
-                  style={{
-                    background: "var(--bg-panel)",
-                    borderLeft: "1px solid var(--border)",
-                    borderRight: "1px solid var(--border)",
-                    borderBottom: "1px solid var(--border)",
-                    overflow: "hidden",
-                    padding: 4,
-                  }}
-                >
-                  {THEME_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => {
-                        setThemePreference(option.id);
-                        themeBtnRef.current?.focus();
-                        setActiveTopPanel(null);
-                      }}
-                      role="menuitemradio"
-                      aria-checked={preference === option.id}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        width: "100%", minHeight: 34, padding: "0 10px",
-                        border: "none", borderRadius: 4,
-                        background: preference === option.id ? "var(--bg-selected)" : "transparent",
-                        color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
-                        transition: "background 0.1s",
-                      }}
-                      onMouseEnter={(event) => {
-                        if (preference !== option.id) event.currentTarget.style.background = "var(--bg-hover)";
-                      }}
-                      onMouseLeave={(event) => {
-                        if (preference !== option.id) event.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <ThemeIcon preference={option.id} size={16} />
-                      <span>{translate(option.label)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
               {activeTopPanel === "agents" && activeSessionFamily && selectedSession && (
                 <AgentSessionPanel
                   rootSession={activeSessionFamily.root}

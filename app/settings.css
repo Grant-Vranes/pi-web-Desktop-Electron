@@ -251,6 +251,27 @@
   gap: 10px;
 }
 
+.agents-concurrency-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.agents-concurrency-control input {
+  width: 52px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+}
+
 .config-sidebar-message {
   padding: 10px 8px;
   color: var(--text-muted);
@@ -1145,8 +1166,8 @@
   }
 
   .agents-feature-actions {
-    flex-direction: column-reverse;
-    align-items: flex-end;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .config-detail {

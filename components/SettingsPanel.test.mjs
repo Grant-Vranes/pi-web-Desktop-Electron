@@ -63,6 +63,12 @@ test("offers five palettes and system theme selection with native radios", () =>
   assert.match(themeSource, /const setThemePreference = useCallback/);
 });
 
+test("keeps language selection in General settings", () => {
+  assert.match(panelSource, /t\("common\.language"\)/);
+  assert.match(panelSource, /className="settings-language-options"/);
+  assert.match(panelSource, /setLocale\(plugin\.id/);
+});
+
 test("groups chat display controls together without row backgrounds", () => {
   const appearanceSection = panelSource.slice(
     panelSource.indexOf('{t("settings.appearance")}'),

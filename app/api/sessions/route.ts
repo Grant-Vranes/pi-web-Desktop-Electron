@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { jsonResponse } from "@/lib/json-response";
 import {
   attachSessionProjectInfo,
   getSessionListVersion,
@@ -25,7 +26,8 @@ export async function GET(req: Request) {
       attachSessionProjectInfo(getRpcSessionInfos()),
     ]);
     const sessions = mergeSessionLists(persistedSessions, runtimeSessions);
-    return NextResponse.json(
+    return jsonResponse(
+      req,
       {
         sessions,
         sessionListVersion,
