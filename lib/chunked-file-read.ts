@@ -17,8 +17,8 @@ export interface TextWithMetadata {
   mtimeMs: number;
 }
 
-const MAX_READ_RESTARTS = 2;
-const MAX_CHUNKS = 64;
+const MAX_READ_RESTARTS = 3;
+const MAX_CHUNKS = 1024;
 
 function readChunkMetadata(chunk: TextChunk, subject: string): { size: number; mtimeMs: number } {
   if (typeof chunk.size !== "number" || typeof chunk.mtimeMs !== "number") {
