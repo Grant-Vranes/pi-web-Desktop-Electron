@@ -1,8 +1,18 @@
-# Pi Web（增强版）
+# Desktop
 
-基于 [agegr/pi-web](https://github.com/agegr/pi-web) 的增强分支，为 [pi coding agent](https://github.com/earendil-works/pi) 提供本地浏览器 / 桌面端界面。上游原版说明见 [README_ORIGINAL.md](./README_ORIGINAL.md)。
+基于 [pi-web](https://github.com/agegr/pi-web) 构建的桌面端应用，为 [pi coding agent](https://github.com/earendil-works/pi) 提供原生桌面界面。上游原版说明见 [README_Original/README.md](./README_Original/README.md)。
 
-本分支在上游基础上新增了 **Electron 桌面端**、**代理（Proxy）支持**，并对**整体 UI 与文件管理体验**做了大量改进。
+本项目以 pi-web 为基础进行构建，并会**持续更新、集成 pi-web 上游的核心功能**：每当上游发布新能力，我们都会跟进合入，保证桌面端与上游体验一致。
+
+在上游基础上，本项目新增了 **Electron 桌面端**、**代理（Proxy）支持**，并对**整体 UI 与文件管理体验**做了大量改进。
+
+| 整体页面<br />![image-20260913185856375](./docs/screenshots/image-20260913185856375.png) | 代理配置<br />![image-20260913190131381](./docs/screenshots/image-20260913190131381.png) |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 项目快捷切换指示灯![image-20260913190344599](./docs/screenshots/image-20260913190344599.png) | 支持会话归档<br />![image-20260913190535471](./docs/screenshots/image-20260913190535471.png) |
+| 支持文件浏览器右键功能<br />![image-20260913190609322](./docs/screenshots/image-20260913190609322.png) | 支持exclidraw显示编辑、支持文本文件编辑显示<br />![image-20260913190753683](./docs/screenshots/image-20260913190753683.png) |
+|                                                              |                                                              |
+
+
 
 ## 本分支的增强
 
@@ -33,7 +43,7 @@
 - **项目侧栏**：项目栏右键菜单、项目重命名（显示别名）、按项目批量删除会话。
 - **细节打磨**：会话历史显示绝对时间戳、输入栏显示当前 Git 分支、聊天输入支持拖拽路径引用等。
 
-## 继承自上游的核心功能
+## 已集成的上游核心功能
 
 - **会话工作区**：按项目浏览、继续、重命名、导出和删除对话，显示运行状态、上下文占用、花费与压缩信息。
 - **两种分支方式**：**新会话**从较早消息创建独立会话文件；**从此处编辑**在当前会话内创建分支。
@@ -135,7 +145,7 @@ public/          静态资源与 PWA 文件
 docs/            用户与贡献者文档
 ```
 
-架构细节与文件地图见 [AGENTS.md](./AGENTS.md)；上游原版 README 见 [README_ORIGINAL.md](./README_ORIGINAL.md)。
+架构细节与文件地图见 [AGENTS.md](./AGENTS.md)；上游原版 README 见 [README_Original/README.md](./README_Original/README.md)。
 
 ## License
 
