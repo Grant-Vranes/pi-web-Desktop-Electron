@@ -537,6 +537,8 @@ export const zhCNLocale: LocalePlugin = {
     "i18n.saveFailed": "保存失败",
     "i18n.openAsText": "以文本方式打开",
     "i18n.invalidExcalidrawScene": "该文件不是有效的 Excalidraw 场景。",
+    "i18n.invalidDrawioFile": "该文件不是有效的 drawio 图表。",
+    "i18n.drawioLoadFailed": "drawio 编辑器资源未安装。请运行：npm run fetch-drawio",
     "i18n.searchInFile": "文件内搜索",
     "i18n.matchCase": "区分大小写",
     "i18n.previousMatch": "上一个匹配",

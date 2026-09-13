@@ -537,6 +537,8 @@ export const enLocale: LocalePlugin = {
     "i18n.saveFailed": "Save failed",
     "i18n.openAsText": "Open as text",
     "i18n.invalidExcalidrawScene": "This file is not a valid Excalidraw scene.",
+    "i18n.invalidDrawioFile": "This file is not a valid drawio diagram.",
+    "i18n.drawioLoadFailed": "The drawio editor assets are not installed. Run: npm run fetch-drawio",
     "i18n.searchInFile": "Search in file",
     "i18n.matchCase": "Match case",
     "i18n.previousMatch": "Previous match",
