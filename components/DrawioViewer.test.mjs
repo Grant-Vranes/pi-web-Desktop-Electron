@@ -65,3 +65,12 @@ test("entering edit mode invalidates in-flight reads and resets baselines", () =
   assert.match(source, /const enterEdit = useCallback[\s\S]*?readRequestRef\.current \+= 1;/s);
   assert.match(source, /lastBaselineRef\.current = null;/);
 });
+
+test("conflict UI is an overlay, not an iframe-replacing branch", () => {
+  assert.match(source, /saveConflict && \(/);
+  assert.doesNotMatch(source, /\) : saveConflict \?/);
+});
+
+test("exitEdit is blocked while the conflict overlay is up", () => {
+  assert.match(source, /const exitEdit = useCallback\(\(\) => \{\s*\n[\s\S]{0,200}?if \(saveConflict\) return;/s);
+});

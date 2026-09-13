@@ -447,6 +447,9 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
   }, [xml]);
 
   const exitEdit = useCallback(() => {
+    // 冲突 UI 显示中:必须先选覆盖或取消。防抖路径的 pendingXmlRef 已被清空,
+    // 此时 flushPending() 返回 "idle",不拦住就会退出并丢弃 latestXmlRef 里的编辑。
+    if (saveConflict) return;
     void flushPending().then((status) => {
       if (status === "conflict") return; // 冲突 UI 已显示,停在编辑态由用户决策
       setSaveConflict(false);
@@ -455,7 +458,7 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
       setDirty(false);
       void loadFile();
     });
-  }, [flushPending, loadFile]);
+  }, [saveConflict, flushPending, loadFile]);
 
   const forceSave = useCallback(() => {
     const content = latestXmlRef.current;
@@ -533,29 +536,6 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
               {t("i18n.openAsText")}
             </button>
           </div>
-        ) : saveConflict ? (
-          <div
-            style={{
-              height: "100%",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 12,
-              padding: 24,
-              fontSize: 13,
-            }}
-          >
-            <span>{t("i18n.fileChangedOnDisk")}</span>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" style={ICON_BUTTON_STYLE} onClick={forceSave}>
-                {t("i18n.overwrite")}
-              </button>
-              <button type="button" style={ICON_BUTTON_STYLE} onClick={cancelConflict}>
-                {t("i18n.cancel")}
-              </button>
-            </div>
-          </div>
         ) : mode === "edit" ? (
           frameError ? (
             <div
@@ -628,6 +608,36 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
             }}
           >
             {saveError}
+          </div>
+        )}
+        {/* 冲突 UI 是覆盖层:iframe 保持挂载,drawio 编辑器状态不被销毁,
+            覆盖后无需重载(重载会用过期的 initialEditXml 回滚用户的覆盖)。 */}
+        {saveConflict && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 3,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              padding: 24,
+              fontSize: 13,
+              color: "var(--text)",
+            }}
+          >
+            <span>{t("i18n.fileChangedOnDisk")}</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" style={ICON_BUTTON_STYLE} onClick={forceSave}>
+                {t("i18n.overwrite")}
+              </button>
+              <button type="button" style={ICON_BUTTON_STYLE} onClick={cancelConflict}>
+                {t("i18n.cancel")}
+              </button>
+            </div>
           </div>
         )}
       </div>
