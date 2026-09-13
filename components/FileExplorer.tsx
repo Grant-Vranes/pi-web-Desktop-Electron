@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import {
   encodeFilePathForApi,
@@ -304,6 +304,125 @@ function DismissButton({ onClick, title }: { onClick: () => void; title: string 
   );
 }
 
+function MenuIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function MenuIconFilePlus() {
+  return (
+    <MenuIcon>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M9 15h6" />
+      <path d="M12 12v6" />
+    </MenuIcon>
+  );
+}
+
+function MenuIconFolderPlus() {
+  return (
+    <MenuIcon>
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+      <path d="M12 10v6" />
+      <path d="M9 13h6" />
+    </MenuIcon>
+  );
+}
+
+function MenuIconCopy() {
+  return (
+    <MenuIcon>
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </MenuIcon>
+  );
+}
+
+function MenuIconScissors() {
+  return (
+    <MenuIcon>
+      <circle cx="6" cy="6" r="3" />
+      <path d="M8.12 8.12 12 12" />
+      <path d="M20 4 8.12 15.88" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M14.8 14.8 20 20" />
+    </MenuIcon>
+  );
+}
+
+function MenuIconPencil() {
+  return (
+    <MenuIcon>
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </MenuIcon>
+  );
+}
+
+function MenuIconPaste() {
+  return (
+    <MenuIcon>
+      <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    </MenuIcon>
+  );
+}
+
+function MenuIconTrash() {
+  return (
+    <MenuIcon>
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </MenuIcon>
+  );
+}
+
+function MenuSeparator() {
+  return <div role="separator" style={{ height: 1, margin: "4px 2px", background: "var(--border)" }} />;
+}
+
+function MenuItemButton({ icon, label, danger = false, disabled = false, onClick }: {
+  icon: React.ReactNode;
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        padding: "6px 8px",
+        border: 0,
+        background: "none",
+        color: danger ? "#f87171" : "var(--text)",
+        textAlign: "left",
+        cursor: disabled ? "default" : "pointer",
+        fontSize: 12,
+      }}
+    >
+      <span aria-hidden="true" style={{ flexShrink: 0, display: "flex", alignItems: "center", color: danger ? "#f87171" : "var(--text-muted)" }}>{icon}</span>
+      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+    </button>
+  );
+}
+
 function TreeNode({
   node,
   depth,
@@ -321,6 +440,8 @@ function TreeNode({
   onContextMenu,
   onInternalFolderDrop,
   cutPath,
+  selectedPath,
+  onSelect,
 }: {
   node: FileNode;
   depth: number;
@@ -338,9 +459,12 @@ function TreeNode({
   onContextMenu?: (node: FileNode, event: React.MouseEvent) => void;
   onInternalFolderDrop?: (target: FileNode, sourcePath: string, sourceIsDir: boolean) => void;
   cutPath?: string | null;
+  selectedPath?: string | null;
+  onSelect?: (path: string) => void;
 }) {
   const open = expandedPaths.has(node.fullPath);
   const highlighted = highlightedPaths.has(node.fullPath);
+  const selected = selectedPath != null && sameFilePath(selectedPath, node.fullPath);
   const isCut = cutPath !== null && cutPath !== undefined && sameFilePath(cutPath, node.fullPath);
   const normalizedPath = normalizeFilePathSlashes(node.fullPath);
   const gitStatus = gitStatusByPath.get(normalizedPath);
@@ -377,6 +501,7 @@ function TreeNode({
   }, [refreshToken]);
 
   const handleClick = useCallback(() => {
+    onSelect?.(node.fullPath);
     if (node.isDir) {
       const next = !open;
       onToggleExpanded(node.fullPath, next);
@@ -384,7 +509,7 @@ function TreeNode({
     } else {
       onOpenFile(node.fullPath, node.name);
     }
-  }, [node.isDir, node.fullPath, node.name, loaded, open, loadChildren, onOpenFile, onToggleExpanded]);
+  }, [node.isDir, node.fullPath, node.name, loaded, open, loadChildren, onOpenFile, onToggleExpanded, onSelect]);
 
   return (
     <div>
@@ -432,7 +557,13 @@ function TreeNode({
           paddingRight: 8,
           height: 24,
           cursor: "pointer",
-          background: isDropOver ? "color-mix(in srgb, var(--accent) 14%, var(--bg-hover))" : hovered ? "var(--bg-hover)" : "transparent",
+          background: isDropOver
+            ? "color-mix(in srgb, var(--accent) 14%, var(--bg-hover))"
+            : selected
+              ? "var(--bg-selected)"
+              : hovered
+                ? "var(--bg-hover)"
+                : "transparent",
           outline: isDropOver ? "1px solid var(--accent)" : "none",
           outlineOffset: -1,
           borderRadius: 4,
@@ -628,6 +759,8 @@ function TreeNode({
               onContextMenu={onContextMenu}
               onInternalFolderDrop={onInternalFolderDrop}
               cutPath={cutPath}
+              selectedPath={selectedPath}
+              onSelect={onSelect}
             />
           ))}
           {children.length === 0 && loaded && (
@@ -740,9 +873,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<{ path: string; mode: "copy" | "cut" } | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [lastContextEntry, setLastContextEntry] = useState<{ path: string; isDir: boolean } | null>(null);
   const [pasteConflict, setPasteConflict] = useState<{ type: "copy" | "move"; sourcePath: string; destinationDirectory: string; name: string } | null>(null);
   const mutationRequestRef = useRef(0);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const dropCounterRef = useRef(0);
   const pasteDestinationDirectory = useMemo(() => {
     if (lastContextEntry) {
@@ -863,6 +998,27 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setContextMenu(null); setPendingMutation(null); setMutationError(null);
   }, []);
 
+  // Select and reveal a node after a mutation: expand its ancestor chain so
+  // the row is visible, then highlight it.
+  const revealAndSelect = useCallback((path: string | null) => {
+    if (!path || sameFilePath(path, cwd)) {
+      setSelectedPath(null);
+      return;
+    }
+    setSelectedPath(path);
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      let dir = getFileDirectory(path);
+      while (dir && !sameFilePath(dir, cwd)) {
+        next.add(dir);
+        const parent = getFileDirectory(dir);
+        if (sameFilePath(parent, dir)) break;
+        dir = parent;
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [cwd]);
+
   const executeMutation = useCallback(async (type: ExplorerMutationType, target: FileNode, body: Record<string, string> = {}) => {
     const requestId = mutationRequestRef.current += 1;
     setMutationBusy(true); setMutationError(null);
@@ -870,7 +1026,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       const result = await requestFileMutation(target.fullPath, type, body);
       if (type === "delete") onFileMutation?.({ kind: "delete", sourcePath: target.fullPath });
       if ((type === "rename" || type === "move") && result.destinationPath) onFileMutation?.({ kind: type === "rename" ? "rename" : "move", sourcePath: target.fullPath, destinationPath: result.destinationPath });
-      if (requestId === mutationRequestRef.current) finishMutation();
+      if (requestId === mutationRequestRef.current) {
+        finishMutation();
+        if (type === "delete") revealAndSelect(getFileDirectory(target.fullPath));
+        else if (result.destinationPath) revealAndSelect(result.destinationPath);
+      }
     }
     catch (cause) {
       if (requestId === mutationRequestRef.current) {
@@ -884,7 +1044,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     finally {
       if (requestId === mutationRequestRef.current) setMutationBusy(false);
     }
-  }, [finishMutation, onFileMutation, t]);
+  }, [finishMutation, onFileMutation, revealAndSelect, t]);
 
   const performPaste = useCallback(async (mode: "copy" | "cut", sourcePath: string, destinationDirectory: string, conflict: "error" | "overwrite" | "keep-both") => {
     const type = mode === "copy" ? "copy" : "move";
@@ -897,7 +1057,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       }
       const result = await requestFileMutation(sourcePath, type, { destinationDirectory, conflict });
       setTreeRefreshKey((key) => key + 1);
-      if (result.destinationPath) setHighlightedPaths(new Set([result.destinationPath]));
+      if (result.destinationPath) {
+        setHighlightedPaths(new Set([result.destinationPath]));
+        revealAndSelect(result.destinationPath);
+      }
       if (mode === "cut") setClipboard(null);
       if (mode === "cut" && result.destinationPath) {
         onFileMutation?.({ kind: "move", sourcePath, destinationPath: result.destinationPath });
@@ -915,7 +1078,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     finally {
       if (requestId === mutationRequestRef.current) setMutationBusy(false);
     }
-  }, [onFileMutation, t]);
+  }, [onFileMutation, revealAndSelect, t]);
 
   const handleExplorerKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
@@ -953,6 +1116,23 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") setContextMenu(null); };
     document.addEventListener("pointerdown", close, true); document.addEventListener("keydown", keydown, true);
     return () => { document.removeEventListener("pointerdown", close, true); document.removeEventListener("keydown", keydown, true); };
+  }, [contextMenu]);
+
+  // Keep the context menu fully inside the viewport when it is opened near
+  // the right or bottom edge; measure after the first paint and shift back.
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const menu = contextMenuRef.current;
+    if (!menu) return;
+    const rect = menu.getBoundingClientRect();
+    const margin = 8;
+    const maxLeft = window.innerWidth - rect.width - margin;
+    const maxTop = window.innerHeight - rect.height - margin;
+    const left = Math.max(margin, Math.min(contextMenu.x, maxLeft));
+    const top = Math.max(margin, Math.min(contextMenu.y, maxTop));
+    if (left !== contextMenu.x || top !== contextMenu.y) {
+      setContextMenu({ ...contextMenu, x: left, y: top });
+    }
   }, [contextMenu]);
 
   const applyUploadResult = useCallback((data: UploadResponse, targetDir: string = cwd) => {
@@ -1092,6 +1272,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setClipboard(null);
       setLastContextEntry(null);
       setPasteConflict(null);
+      setSelectedPath(null);
     }
 
     setLoading(cwdChanged);
@@ -1463,6 +1644,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 onContextMenu={openContextMenu}
                 onInternalFolderDrop={handleInternalFolderDrop}
                 cutPath={clipboard?.mode === "cut" ? clipboard.path : null}
+                selectedPath={selectedPath}
+                onSelect={revealAndSelect}
               />
             ))
           )}
@@ -1479,23 +1662,41 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           <DismissButton onClick={() => setMutationError(null)} title={t("files.dismissOperationError")} />
         </div>
       )}
-      {contextMenu && (
-        <div data-file-explorer-menu data-last-context-entry={lastContextEntry?.path ?? ""} role="menu" style={{ position: "fixed", zIndex: 30, top: contextMenu.y, left: contextMenu.x, minWidth: 150, padding: 4, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", boxShadow: "0 8px 20px rgba(0,0,0,.2)" }}>
-          {contextMenu.target.isDir && <>
-            <button type="button" role="menuitem" disabled={mutationBusy} onClick={() => { setPendingMutation({ type: "create-file", target: contextMenu.target }); setMutationName(""); setContextMenu(null); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.newFile")}</button>
-            <button type="button" role="menuitem" disabled={mutationBusy} onClick={() => { setPendingMutation({ type: "create-directory", target: contextMenu.target }); setMutationName(""); setContextMenu(null); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.newFolder")}</button>
-          </>}
-          {!contextMenu.isRoot && <>
-            <button type="button" role="menuitem" disabled={mutationBusy} onClick={() => { setClipboard({ path: contextMenu.target.fullPath, mode: "copy" }); setContextMenu(null); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.copy")}</button>
-            <button type="button" role="menuitem" disabled={mutationBusy} onClick={() => { setClipboard({ path: contextMenu.target.fullPath, mode: "cut" }); setContextMenu(null); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.cut")}</button>
-            <button type="button" role="menuitem" disabled={mutationBusy} onClick={() => { setPendingMutation({ type: "rename", target: contextMenu.target }); setMutationName(contextMenu.target.name); setContextMenu(null); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.rename")}</button>
-            <button type="button" role="menuitem" disabled={mutationBusy} onClick={() => { const target = contextMenu.target; const confirmKey = target.isDir ? "files.confirmDeleteDirectory" : "files.confirmDelete"; if (window.confirm(t(confirmKey, { name: target.name }))) void executeMutation("delete", target); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "#f87171", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.delete")}</button>
-          </>}
-          {contextMenu.target.isDir && (
-            <button type="button" role="menuitem" disabled={mutationBusy || !clipboard} onClick={() => { const entry = clipboard; setContextMenu(null); if (entry) void performPaste(entry.mode, entry.path, contextMenu.target.fullPath, "error"); }} style={{ display: "block", width: "100%", padding: "6px 8px", border: 0, background: "none", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>{t("files.paste")}</button>
-          )}
-        </div>
-      )}
+      {contextMenu && (() => {
+        const target = contextMenu.target;
+        const siblingDirectoryNode: FileNode = contextMenu.isRoot
+          ? target
+          : { name: getFileName(getFileDirectory(target.fullPath)), fullPath: getFileDirectory(target.fullPath), isDir: true, size: 0, loaded: true };
+        return (
+          <div ref={contextMenuRef} data-file-explorer-menu data-last-context-entry={lastContextEntry?.path ?? ""} role="menu" style={{ position: "fixed", zIndex: 30, top: contextMenu.y, left: contextMenu.x, minWidth: 190, padding: 4, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", boxShadow: "0 8px 20px rgba(0,0,0,.2)" }}>
+            <MenuItemButton icon={<MenuIconFilePlus />} disabled={mutationBusy} label={t(contextMenu.isRoot ? "files.newFileInside" : "files.newFileSibling")} onClick={() => { setPendingMutation({ type: "create-file", target: siblingDirectoryNode }); setMutationName(""); setContextMenu(null); }} />
+            <MenuItemButton icon={<MenuIconFolderPlus />} disabled={mutationBusy} label={t(contextMenu.isRoot ? "files.newFolderInside" : "files.newFolderSibling")} onClick={() => { setPendingMutation({ type: "create-directory", target: siblingDirectoryNode }); setMutationName(""); setContextMenu(null); }} />
+            {target.isDir && !contextMenu.isRoot && (
+              <>
+                <MenuItemButton icon={<MenuIconFilePlus />} disabled={mutationBusy} label={t("files.newFileInside")} onClick={() => { setPendingMutation({ type: "create-file", target }); setMutationName(""); setContextMenu(null); }} />
+                <MenuItemButton icon={<MenuIconFolderPlus />} disabled={mutationBusy} label={t("files.newFolderInside")} onClick={() => { setPendingMutation({ type: "create-directory", target }); setMutationName(""); setContextMenu(null); }} />
+              </>
+            )}
+            {!contextMenu.isRoot && (
+              <>
+                <MenuSeparator />
+                <MenuItemButton icon={<MenuIconCopy />} disabled={mutationBusy} label={t("files.copy")} onClick={() => { setClipboard({ path: target.fullPath, mode: "copy" }); setContextMenu(null); }} />
+                <MenuItemButton icon={<MenuIconScissors />} disabled={mutationBusy} label={t("files.cut")} onClick={() => { setClipboard({ path: target.fullPath, mode: "cut" }); setContextMenu(null); }} />
+                <MenuItemButton icon={<MenuIconPencil />} disabled={mutationBusy} label={t("files.rename")} onClick={() => { setPendingMutation({ type: "rename", target }); setMutationName(target.name); setContextMenu(null); }} />
+              </>
+            )}
+            {target.isDir && (
+              <MenuItemButton icon={<MenuIconPaste />} disabled={mutationBusy || !clipboard} label={t("files.paste")} onClick={() => { const entry = clipboard; setContextMenu(null); if (entry) void performPaste(entry.mode, entry.path, target.fullPath, "error"); }} />
+            )}
+            {!contextMenu.isRoot && (
+              <>
+                <MenuSeparator />
+                <MenuItemButton icon={<MenuIconTrash />} danger disabled={mutationBusy} label={t("files.delete")} onClick={() => { const confirmKey = target.isDir ? "files.confirmDeleteDirectory" : "files.confirmDelete"; if (window.confirm(t(confirmKey, { name: target.name }))) void executeMutation("delete", target); }} />
+              </>
+            )}
+          </div>
+        );
+      })()}
       {pendingMutation && (
         <div role="dialog" aria-modal="true" aria-label={pendingMutation.type === "rename" ? t("files.rename") : t("files.create")} style={{ position: "fixed", inset: 0, zIndex: 31, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.35)" }}>
           <form onSubmit={(event) => { event.preventDefault(); const type = pendingMutation.type; const target = type === "rename" ? pendingMutation.target : { ...pendingMutation.target, fullPath: pendingMutation.target.fullPath }; void executeMutation(type, target, { name: mutationName }); }} onKeyDown={(event) => { if (event.key === "Escape") setPendingMutation(null); }} style={{ width: 320, padding: 16, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)" }}>

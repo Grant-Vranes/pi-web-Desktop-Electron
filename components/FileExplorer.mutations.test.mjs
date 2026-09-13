@@ -31,17 +31,48 @@ test("mutation errors remain available inside the active name dialog", () => {
 });
 
 test("context menu actions are disabled during mutations", () => {
-  const menuSection = source.slice(source.indexOf("{contextMenu && ("), source.indexOf("{pendingMutation && ("));
-  // Create-file/create-directory (2), copy, cut, rename and delete use the
-  // shared busy guard; paste adds its own clipboard-null guard.
-  assert.equal((menuSection.match(/disabled=\{mutationBusy\}/g) ?? []).length, 6);
+  const menuSection = source.slice(source.indexOf("{contextMenu && (() => {"), source.indexOf("{pendingMutation && ("));
+  // Sibling create-file/create-directory (2), copy, cut, rename and delete use
+  // the shared busy guard; the dir-inside create pair and paste add their own.
+  assert.equal((menuSection.match(/disabled=\{mutationBusy\}/g) ?? []).length, 8);
 });
 
 test("clipboard holds a single entry set from the context menu", () => {
   assert.match(source, /useState<\{ path: string; mode: "copy" \| "cut" \} \| null>\(null\)/);
   assert.match(source, /setLastContextEntry\(\{ path: target\.fullPath, isDir: target\.isDir \}\)/);
-  assert.match(source, /setClipboard\(\{ path: contextMenu\.target\.fullPath, mode: "copy" \}\)/);
-  assert.match(source, /setClipboard\(\{ path: contextMenu\.target\.fullPath, mode: "cut" \}\)/);
+  assert.match(source, /setClipboard\(\{ path: target\.fullPath, mode: "copy" \}\)/);
+  assert.match(source, /setClipboard\(\{ path: target\.fullPath, mode: "cut" \}\)/);
+});
+
+test("context menu offers sibling creation with icons and keeps delete last", () => {
+  const menuSection = source.slice(source.indexOf("{contextMenu && (() => {"), source.indexOf("{pendingMutation && ("));
+  const siblingCreate = menuSection.indexOf("files.newFileSibling");
+  const deleteItem = menuSection.indexOf("files.delete");
+  assert.ok(siblingCreate >= 0, "sibling create-file entry exists");
+  assert.ok(deleteItem > siblingCreate, "delete renders after sibling create");
+  assert.match(menuSection, /siblingDirectoryNode/);
+  assert.match(menuSection, /MenuIconFilePlus/);
+  assert.match(menuSection, /MenuIconFolderPlus/);
+  assert.match(menuSection, /MenuIconTrash/);
+  assert.match(menuSection, /MenuSeparator/);
+});
+
+test("context menu stays inside the viewport when opened near an edge", () => {
+  assert.match(source, /const contextMenuRef = useRef<HTMLDivElement \| null>\(null\);/);
+  assert.match(source, /useLayoutEffect\(\(\) => \{\s*if \(!contextMenu\) return;\s*const menu = contextMenuRef\.current;/);
+  assert.match(source, /window\.innerWidth - rect\.width - margin/);
+  assert.match(source, /window\.innerHeight - rect\.height - margin/);
+  assert.match(source, /Math\.max\(margin, Math\.min\(contextMenu\.x, maxLeft\)\)/);
+  assert.match(source, /Math\.max\(margin, Math\.min\(contextMenu\.y, maxTop\)\)/);
+});
+
+test("mutations reveal and select the resulting node", () => {
+  assert.match(source, /const revealAndSelect = useCallback\(\(path: string \| null\) => \{/);
+  assert.match(source, /if \(type === "delete"\) revealAndSelect\(getFileDirectory\(target\.fullPath\)\);/);
+  assert.match(source, /else if \(result\.destinationPath\) revealAndSelect\(result\.destinationPath\);/);
+  assert.match(source, /selectedPath=\{selectedPath\}/);
+  assert.match(source, /onSelect=\{revealAndSelect\}/);
+  assert.match(source, /: selected\s*\? "var\(--bg-selected\)"/);
 });
 
 test("entries held as cut render dimmed", () => {
