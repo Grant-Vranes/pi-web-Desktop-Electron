@@ -58,3 +58,4 @@ desktop-runtime/
 
 src-tauri/gen/
 src-tauri/target/
+/public/drawio/
