@@ -90,3 +90,7 @@ export function isDocumentPreviewPath(filePath: string): boolean {
 export function isExcalidrawPath(filePath: string): boolean {
   return getFileExt(filePath) === "excalidraw";
 }
+
+export function isDrawioPath(filePath: string): boolean {
+  return getFileExt(filePath) === "drawio";
+}

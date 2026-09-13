@@ -90,6 +90,28 @@ function ExcalidrawIcon({ size = 14 }: IconProps) {
   );
 }
 
+function DrawioIcon({ size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Connected diagram nodes: source box -> arrow -> target box */}
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <path d="M10 6.5h4a3 3 0 0 1 3 3V14" />
+      <path d="m14.5 11.5 2.5 2.5 2.5-2.5" />
+    </svg>
+  );
+}
+
 const EXTENSION_ICONS: Record<string, CatppuccinIconName> = {
   ts: "typescript",
   tsx: "typescript-react",
@@ -146,6 +168,7 @@ export function getFileIcon(name: string, size = 14): React.ReactNode {
 
   const ext = lower.split(".").pop() ?? "";
   if (ext === "excalidraw") return <ExcalidrawIcon size={size} />;
+  if (ext === "drawio") return <DrawioIcon size={size} />;
   const icon = EXTENSION_ICONS[ext];
   return icon ? <CatppuccinIcon name={icon} size={size} /> : <GenericFileIcon size={size} />;
 }

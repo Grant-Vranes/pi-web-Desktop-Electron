@@ -66,3 +66,12 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
   }
   assert.equal(render(large, "source", false, false, true)[0].props.children[1].props.style.whiteSpace, "pre-wrap");
 });
+
+test("dispatches .drawio files to DrawioViewer before the text fallback", () => {
+  assert.match(source, /isDrawioPath/);
+  assert.match(source, /const DrawioViewer = dynamic\(\(\) => import\("\.\/DrawioViewer"\), \{\s*ssr: false/s);
+  assert.match(source, /isDrawioPath\(filePath\) && !textFallback/);
+  assert.match(source, /<DrawioViewer[\s\S]*?onFallbackToText=\{\(\) => setTextFallback\(true\)\}\s*\/>/s);
+  // excalidraw 分支不受影响
+  assert.match(source, /isExcalidrawPath\(filePath\) && !textFallback/);
+});

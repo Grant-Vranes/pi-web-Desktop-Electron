@@ -23,6 +23,7 @@ import {
   getFileExt,
   isAudioPath,
   isDocumentPreviewPath,
+  isDrawioPath,
   isExcalidrawPath,
   isImagePath,
   isVideoPath,
@@ -56,6 +57,11 @@ function FileViewerLoadingPlaceholder() {
 }
 
 const ExcalidrawViewer = dynamic(() => import("./ExcalidrawViewer"), {
+  ssr: false,
+  loading: () => <FileViewerLoadingPlaceholder />,
+});
+
+const DrawioViewer = dynamic(() => import("./DrawioViewer"), {
   ssr: false,
   loading: () => <FileViewerLoadingPlaceholder />,
 });
@@ -1120,6 +1126,17 @@ export function FileViewer({
   }
   if (isDocumentPreviewPath(filePath)) {
     return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
+  }
+  if (isDrawioPath(filePath) && !textFallback) {
+    return (
+      <DrawioViewer
+        filePath={filePath}
+        cwd={cwd}
+        sourceSessionId={sourceSessionId}
+        watchEnabled={watchEnabled}
+        onFallbackToText={() => setTextFallback(true)}
+      />
+    );
   }
   if (isExcalidrawPath(filePath) && !textFallback) {
     return (
