@@ -194,7 +194,13 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
   modeRef.current = mode;
 
   const checkAssets = useCallback(async () => {
-    const response = await fetch(`${DRAWIO_APP_BASE}/DRAWIO_VERSION`);
+    let response: Response;
+    try {
+      response = await fetch(`${DRAWIO_APP_BASE}/DRAWIO_VERSION`);
+    } catch {
+      // 浏览器离线 / 资产目录缺失:与 HTTP 失败同样走资产缺失提示。
+      throw new Error(t("i18n.drawioLoadFailed"));
+    }
     if (!response.ok) throw new Error(t("i18n.drawioLoadFailed"));
   }, [t]);
 
@@ -316,7 +322,7 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
         ) : !xml ? (
           <LoadingPlaceholder />
         ) : (
-          <DrawioStaticView xml={xml} reloadKey={reloadKey} onRenderError={() => setError(t("i18n.drawioLoadFailed"))} />
+          <DrawioStaticView xml={xml} reloadKey={reloadKey} onRenderError={() => setError(t("i18n.invalidDrawioFile"))} />
         )}
       </div>
     </div>
