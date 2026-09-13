@@ -32,3 +32,36 @@ test("reads the file through the shared chunked reader with the drawio subject",
 test("external file changes reload only outside edit mode", () => {
   assert.match(source, /modeRef\.current === "view"[\s\S]*?void loadFile\(\)/s);
 });
+
+test("edit mode validates iframe messages by source and same origin", () => {
+  assert.match(source, /event\.source !== frameRef\.current\?\.contentWindow/);
+  assert.match(source, /event\.origin !== window\.location\.origin/);
+  assert.match(source, /action: "load", xml: initialEditXml \?\? undefined, autosave: 1/);
+});
+
+test("first observed save is a baseline, not an edit", () => {
+  assert.match(source, /if \(lastBaselineRef\.current === null\) \{[\s\S]*?lastBaselineRef\.current = record\.xml;/s);
+});
+
+test("saves are debounced and flushed on exit and unmount", () => {
+  assert.match(source, /CHANGE_DEBOUNCE_MS = 500/);
+  assert.match(source, /const exitEdit = useCallback[\s\S]*?flushPending\(\)/s);
+  assert.match(source, /useEffect\(\s*\(\) => \(\) => \{[\s\S]*?flushPendingRef\.current\(\)/s);
+});
+
+test("write sends baseMtimeMs and handles 409 conflicts with force overwrite", () => {
+  assert.match(source, /baseMtimeMs:\s*options\.force\s*\?\s*null\s*:\s*baseMtimeMsRef\.current/);
+  assert.match(source, /response\.status === 409/);
+  assert.match(source, /setSaveConflict\(true\)/);
+  assert.match(source, /writeXml\(content, \{ force: true \}\)/);
+});
+
+test("edit iframe is same-origin with embed protocol params", () => {
+  assert.match(source, /embed: "1",\s*proto: "json",\s*ui: "kennedy",\s*noExitBtn: "1",\s*spin: "1"/s);
+  assert.match(source, /DRAWIO_APP_BASE\}\/index\.html/);
+});
+
+test("entering edit mode invalidates in-flight reads and resets baselines", () => {
+  assert.match(source, /const enterEdit = useCallback[\s\S]*?readRequestRef\.current \+= 1;/s);
+  assert.match(source, /lastBaselineRef\.current = null;/);
+});
