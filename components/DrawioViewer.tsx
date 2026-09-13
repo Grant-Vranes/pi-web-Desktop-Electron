@@ -22,6 +22,10 @@ const VIEWER_GLOBALS: Record<string, string> = {
   mxImageBasePath: `${DRAWIO_APP_BASE}/mxgraph/images`,
   mxBasePath: `${DRAWIO_APP_BASE}/mxgraph/`,
   RESOURCE_BASE: `${DRAWIO_APP_BASE}/resources/grapheditor`,
+  // 本地 404:外链图片/字体请求保持第一方,离线时优雅失败(已接受的离线行为)。
+  PROXY_URL: `${DRAWIO_APP_BASE}/proxy`,
+  DRAWIO_BASE_URL: `${DRAWIO_APP_BASE}`,
+  DRAWIO_LIGHTBOX_URL: `${DRAWIO_APP_BASE}`,
 };
 
 interface GraphViewerCtor {
@@ -207,6 +211,7 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
   const lastBaselineRef = useRef<string | null>(null);
   const pendingXmlRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inflightWriteRef = useRef<Promise<"ok" | "conflict" | "error"> | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
@@ -306,7 +311,7 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
     };
   }, [filePath, sourceSessionId, watchEnabled, loadFile]);
 
-  const writeXml = useCallback(
+  const performWrite = useCallback(
     async (content: string, options: { force?: boolean } = {}): Promise<"ok" | "conflict" | "error"> => {
       setSaving(true);
       setSaveError(null);
@@ -343,6 +348,18 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
     [filePath, sourceSessionId, t],
   );
 
+  // 记录在途写:flushPending 在写请求进行中时必须等待它,而不是误报 "idle"。
+  const writeXml = useCallback(
+    (content: string, options: { force?: boolean } = {}): Promise<"ok" | "conflict" | "error"> => {
+      const promise = performWrite(content, options).finally(() => {
+        if (inflightWriteRef.current === promise) inflightWriteRef.current = null;
+      });
+      inflightWriteRef.current = promise;
+      return promise;
+    },
+    [performWrite],
+  );
+
   const publishChange = useCallback(
     (content: string) => {
       pendingXmlRef.current = content;
@@ -370,6 +387,9 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
       lastBaselineRef.current = pending;
       return writeXml(pending);
     }
+    // 防抖回调已清空 pendingXmlRef 但写请求尚在途:等待它完成,避免在写中途退出。
+    const inflight = inflightWriteRef.current;
+    if (inflight) return inflight;
     return Promise.resolve("idle");
   }, [writeXml]);
 
@@ -451,7 +471,7 @@ export default function DrawioViewer({ filePath, cwd, sourceSessionId, watchEnab
     // 此时 flushPending() 返回 "idle",不拦住就会退出并丢弃 latestXmlRef 里的编辑。
     if (saveConflict) return;
     void flushPending().then((status) => {
-      if (status === "conflict") return; // 冲突 UI 已显示,停在编辑态由用户决策
+      if (status === "conflict" || status === "error") return; // 冲突/写失败:停在编辑态,保留 saveError 提示供重试
       setSaveConflict(false);
       setSaveError(null);
       setMode("view");

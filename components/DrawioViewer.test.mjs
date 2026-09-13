@@ -6,7 +6,7 @@ const source = await readFile(new URL("./DrawioViewer.tsx", import.meta.url), "u
 
 test("pins every drawio asset base to the vendored copy — no network defaults", () => {
   assert.doesNotMatch(source, /viewer\.diagrams\.net/);
-  for (const key of ["STYLE_PATH", "SHAPES_PATH", "STENCIL_PATH", "GRAPH_IMAGE_PATH", "mxImageBasePath", "mxBasePath", "RESOURCE_BASE", "DRAW_MATH_URL"]) {
+  for (const key of ["STYLE_PATH", "SHAPES_PATH", "STENCIL_PATH", "GRAPH_IMAGE_PATH", "mxImageBasePath", "mxBasePath", "RESOURCE_BASE", "DRAW_MATH_URL", "PROXY_URL", "DRAWIO_BASE_URL", "DRAWIO_LIGHTBOX_URL"]) {
     assert.match(source, new RegExp(`${key}: \`\\$\{DRAWIO_APP_BASE\}`), `missing local override for ${key}`);
   }
 });
@@ -47,6 +47,8 @@ test("saves are debounced and flushed on exit and unmount", () => {
   assert.match(source, /CHANGE_DEBOUNCE_MS = 500/);
   assert.match(source, /const exitEdit = useCallback[\s\S]*?flushPending\(\)/s);
   assert.match(source, /useEffect\(\s*\(\) => \(\) => \{[\s\S]*?flushPendingRef\.current\(\)/s);
+  // 写失败(conflict/error)时退出被拒绝:编辑器与错误提示保留,用户可重试。
+  assert.match(source, /status === "conflict" \|\| status === "error"\) return;/);
 });
 
 test("write sends baseMtimeMs and handles 409 conflicts with force overwrite", () => {
