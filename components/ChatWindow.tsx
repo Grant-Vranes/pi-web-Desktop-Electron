@@ -423,6 +423,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const [quoteSubmitting, setQuoteSubmitting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const quotePopoverRef = useRef<HTMLDivElement | null>(null);
+  // Chat column root; the quote popover must stay inside it so it never slides
+  // under the sidebar (z-index 200) or the top bar at viewport edges.
+  const chatRootRef = useRef<HTMLDivElement | null>(null);
   const quoteChatInputRef = useRef<ChatInputHandle | null>(null);
   const closeQuotedSelection = useCallback(() => {
     setQuotedSelection(null);
@@ -486,12 +489,22 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       const rect = popover.getBoundingClientRect();
       const top = viewport?.offsetTop ?? 0;
       const left = viewport?.offsetLeft ?? 0;
-      popover.style.top = `${Math.max(top + 8, Math.min(quotedSelection.top, top + (viewport?.height ?? window.innerHeight) - rect.height - 8))}px`;
-      popover.style.left = `${Math.max(left + 8, Math.min(quotedSelection.left - rect.width / 2, left + (viewport?.width ?? window.innerWidth) - rect.width - 8))}px`;
+      const vpBottom = top + (viewport?.height ?? window.innerHeight);
+      const vpRight = left + (viewport?.width ?? window.innerWidth);
+      // Intersect the visual viewport with the chat column so the popover is
+      // never clamped into regions covered by the sidebar or the top bar.
+      const rootRect = chatRootRef.current?.getBoundingClientRect();
+      const minTop = Math.max(top + 8, (rootRect?.top ?? top) + 8);
+      const maxBottom = Math.min(vpBottom, rootRect?.bottom ?? vpBottom) - 8;
+      const minLeft = Math.max(left + 8, (rootRect?.left ?? left) + 8);
+      const maxRight = Math.min(vpRight, rootRect?.right ?? vpRight) - 8;
+      popover.style.top = `${Math.max(minTop, Math.min(quotedSelection.top, maxBottom - rect.height))}px`;
+      popover.style.left = `${Math.max(minLeft, Math.min(quotedSelection.left - rect.width / 2, maxRight - rect.width))}px`;
     };
     position();
     const observer = new ResizeObserver(position);
     observer.observe(popover);
+    if (chatRootRef.current) observer.observe(chatRootRef.current);
     window.addEventListener("resize", position);
     viewport?.addEventListener("resize", position);
     viewport?.addEventListener("scroll", position);
@@ -1058,6 +1071,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   return (
     <div
+      ref={chatRootRef}
       className="chat-content relative flex h-full min-w-0 flex-col overflow-hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       onDragEnter={handleDragEnter}
