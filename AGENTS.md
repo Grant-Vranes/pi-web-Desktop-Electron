@@ -111,6 +111,7 @@ components/
   FileExplorer.tsx    file tree inside sidebar
   FileIcons.tsx       file icon helpers
   FileViewer.tsx      file content in a tab
+  DrawioViewer.tsx    .drawio diagram viewing (offline viewer.min.js) + editing (self-hosted embed iframe)
   TabBar.tsx          tab bar (Chat + open file tabs)
 
 hooks/
