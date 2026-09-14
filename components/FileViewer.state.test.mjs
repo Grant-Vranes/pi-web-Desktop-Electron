@@ -39,7 +39,9 @@ for (const [name, nextName] of [
 
 test("FileViewer forwards watcher state to every viewer implementation", () => {
   const block = functionBlock("FileViewer", "TextFileViewer");
-  assert.equal(block.match(/watchEnabled=\{watchEnabled\}/g)?.length, 6);
+  // 7 viewers: Image / Audio / Video / Document / Drawio / Excalidraw / Text —
+  // every dispatched viewer implementation must receive the watcher state.
+  assert.equal(block.match(/watchEnabled=\{watchEnabled\}/g)?.length, 7);
 });
 
 test("TextFileViewer snapshots and restores lightweight tab state", () => {
