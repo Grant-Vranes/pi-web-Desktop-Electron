@@ -1936,6 +1936,7 @@ span.token.table {
 /* Project rail: a compact, always-visible workspace switcher. Its restrained
    monochrome tiles let the status signals (blue spin / cyan pulse) do the work. */
 .project-rail {
+  position: relative;
   width: 52px;
   min-width: 52px;
   display: flex;
@@ -2057,6 +2058,86 @@ span.token.table {
   height: 9px;
   border: 2px solid var(--bg-panel);
   border-radius: 50%;
+}
+/* While an OS folder drag hovers the rail, dim the tiles and raise a
+   full-rail "ready to receive" overlay: pulsing dashed accent border with a
+   folder-plus icon and a short drop hint. pointer-events stay off the
+   overlay so drag events keep flowing to the rail handlers. */
+.project-rail.is-folder-drag .project-rail-list,
+.project-rail.is-folder-drag .project-rail-add {
+  opacity: 0.28;
+}
+.project-rail-drop-overlay {
+  position: absolute;
+  z-index: 6;
+  inset: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-panel));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg-panel) 70%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  pointer-events: none;
+  animation: project-rail-drop-pulse 900ms ease-in-out infinite alternate;
+}
+.project-rail-drop-text {
+  max-width: 100%;
+  padding: 0 2px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  word-break: break-word;
+}
+@keyframes project-rail-drop-pulse {
+  from {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-panel));
+  }
+  to {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg-panel));
+  }
+}
+/* Explanation bubble shown after a browser drop whose folder paths cannot be
+   resolved (browser security rule). Floats beside the rail over the session
+   list and disappears on action, outside click of the button, or timeout. */
+.project-rail-drop-notice {
+  position: absolute;
+  z-index: 30;
+  top: 10px;
+  left: calc(100% + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.project-rail-drop-notice-action {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.project-rail-drop-notice-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .project-rail-running {
   border-top-color: transparent;

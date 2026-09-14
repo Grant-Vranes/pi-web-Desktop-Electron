@@ -235,6 +235,8 @@ export const zhTWLocale: LocalePlugin = {
     "sidebar.newSessionTitle": "在 {path} 中新增工作階段",
     "sidebar.refresh": "重新整理",
     "sidebar.selectProject": "選擇專案…",
+    "sidebar.dropToAddProject": "放開加入專案",
+    "sidebar.dropPathUnavailable": "瀏覽器無法讀取拖入資料夾的實際路徑，請手動選擇：",
     "sidebar.filterProjects": "篩選專案…",
     "sidebar.noMatchingProjects": "找不到相符的專案",
     "sidebar.useDefaultDirectory": "使用預設目錄",

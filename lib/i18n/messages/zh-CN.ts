@@ -235,6 +235,8 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.newSessionTitle": "在 {path} 中新建会话",
     "sidebar.refresh": "刷新",
     "sidebar.selectProject": "选择项目…",
+    "sidebar.dropToAddProject": "松开添加项目",
+    "sidebar.dropPathUnavailable": "浏览器无法读取拖入文件夹的实际路径，请手动选择：",
     "sidebar.filterProjects": "筛选项目…",
     "sidebar.noMatchingProjects": "没有匹配的项目",
     "sidebar.useDefaultDirectory": "使用默认目录",

@@ -11,6 +11,7 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects, mergeProjectLists, sessionsForProject, type ProjectSelection } from "@/lib/project-groups";
 import { loadProjectAliases, projectDisplayName, projectFolderName, setProjectAlias, type ProjectAliasMap } from "@/lib/project-alias";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
+import { collectDroppedFolders, isFileDrag, type DroppedFolderPaths } from "@/lib/dropped-folders";
 import { displayCwd } from "@/lib/cwd-display";
 import { openInFileBrowser } from "@/lib/file-browser";
 import type { WorktreeEntry, WorktreeState } from "@/lib/worktree-types";
@@ -149,6 +150,8 @@ interface ValidatedProject {
 
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const PROJECT_RAIL_STORAGE_KEY = "pi-web:project-rail-history";
+/** How long the browser-cannot-resolve-paths notice stays after a folder drop. */
+const FOLDER_DROP_NOTICE_MS = 8000;
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
 const RUNNING_SESSIONS_POLL_MS = 2500;
 // Grace period before the rail tooltip closes after the pointer leaves the
@@ -511,6 +514,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [customPathValue, setCustomPathValue] = useState(loadLastCustomCwd);
   const [customPathError, setCustomPathError] = useState<string | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
+  // Shown after a folder drop the browser recognizes but cannot resolve to an
+  // absolute path (a browser security rule — only the desktop shell maps File
+  // objects to real paths). Explains the limitation instead of surprising the
+  // user with the picker dialog.
+  const [folderDropNotice, setFolderDropNotice] = useState(false);
+  const folderDropNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   // Worktree switcher state
@@ -964,10 +973,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [customPathValue, customPathValidating]);
 
   const handleCustomPathClick = useCallback(() => {
+    setFolderDropNotice(false);
     setCustomPathOpen(true);
     setCustomPathError(null);
     setDropdownOpen(false);
   }, []);
+
+  const showFolderDropNotice = useCallback(() => {
+    setFolderDropNotice(true);
+    if (folderDropNoticeTimer.current !== null) clearTimeout(folderDropNoticeTimer.current);
+    folderDropNoticeTimer.current = setTimeout(() => {
+      folderDropNoticeTimer.current = null;
+      setFolderDropNotice(false);
+    }, FOLDER_DROP_NOTICE_MS);
+  }, []);
+  useEffect(() => () => {
+    if (folderDropNoticeTimer.current !== null) clearTimeout(folderDropNoticeTimer.current);
+  }, []);
+
+  // Dropping folders from the OS onto the project rail adds them to the
+  // workspace. Resolved paths (desktop runtime) go through the same
+  // /api/cwd/validate flow as a manual selection, so identity, allow-roots
+  // registration, and deletion guards behave identically. A plain browser
+  // cannot read absolute paths from an OS drag, so a drop it recognizes as
+  // directories shows an inline notice with a manual-pick shortcut instead
+  // of being ignored or popping a dialog on its own.
+  const handleDroppedProjectFolders = useCallback(async (dropped: DroppedFolderPaths) => {
+    if (dropped.paths.length > 0) {
+      for (const path of dropped.paths) {
+        await commitCustomPath(path);
+      }
+      return;
+    }
+    if (dropped.hasDirectories) showFolderDropNotice();
+  }, [commitCustomPath, showFolderDropNotice]);
 
   // Shared by the rail tiles and the workspace dropdown so both entrances
   // behave identically. Explicit re-selection clears the deletion guard so a
@@ -1309,6 +1348,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         unreadSessionIds={unreadSessionIds}
         onSelect={selectProject}
         onAddProject={handleCustomPathClick}
+        onAddDroppedFolders={handleDroppedProjectFolders}
+        folderDropNotice={folderDropNotice}
+        onDismissFolderDropNotice={() => setFolderDropNotice(false)}
         onReorder={(keys) => {
           const byKey = new Map(railProjects.map((project) => [project.key, project]));
           setProjectRailHistory(keys.flatMap((key) => {
@@ -2004,6 +2046,9 @@ function ProjectRail({
   unreadSessionIds,
   onSelect,
   onAddProject,
+  onAddDroppedFolders,
+  folderDropNotice,
+  onDismissFolderDropNotice,
   onReorder,
   onDeleteProject,
   projectAliases,
@@ -2018,6 +2063,12 @@ function ProjectRail({
   unreadSessionIds: ReadonlySet<string>;
   onSelect: (project: ProjectSelection) => void;
   onAddProject: () => void;
+  /** Handles OS folder drops on the rail; see handleDroppedProjectFolders. */
+  onAddDroppedFolders: (dropped: DroppedFolderPaths) => void;
+  /** True after a browser drop that recognized folders but could not resolve
+   *  their absolute paths; renders an inline explanation beside the rail. */
+  folderDropNotice: boolean;
+  onDismissFolderDropNotice: () => void;
   onReorder: (keys: string[]) => void;
   onDeleteProject?: (project: ProjectSelection) => Promise<ProjectDeleteOutcome>;
   projectAliases: ProjectAliasMap;
@@ -2027,6 +2078,36 @@ function ProjectRail({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ key: string; after: boolean } | null>(null);
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  // OS folder drags highlight the whole rail; a depth counter keeps the
+  // highlight stable while the pointer crosses tile boundaries.
+  const [folderDragActive, setFolderDragActive] = useState(false);
+  const folderDragDepthRef = useRef(0);
+  const resetFolderDrag = useCallback(() => {
+    folderDragDepthRef.current = 0;
+    setFolderDragActive(false);
+  }, []);
+  const handleFolderDragEnter = useCallback((event: React.DragEvent) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    folderDragDepthRef.current += 1;
+    setFolderDragActive(true);
+  }, []);
+  const handleFolderDragOver = useCallback((event: React.DragEvent) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+  const handleFolderDragLeave = useCallback((event: React.DragEvent) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    folderDragDepthRef.current -= 1;
+    if (folderDragDepthRef.current <= 0) resetFolderDrag();
+  }, [resetFolderDrag]);
+  const handleFolderDrop = useCallback((event: React.DragEvent) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    resetFolderDrag();
+    onAddDroppedFolders(collectDroppedFolders(event.dataTransfer));
+  }, [onAddDroppedFolders, resetFolderDrag]);
   // The hovered tile element, captured in onMouseEnter so the tooltip has a
   // stable anchor regardless of ref-callback timing.
   const [hoveredEl, setHoveredEl] = useState<HTMLElement | null>(null);
@@ -2064,7 +2145,15 @@ function ProjectRail({
   }, [runningSessionDetails]);
 
   return (
-    <nav className="project-rail" aria-label={t("sidebar.selectProject")}>
+    <nav
+      className={`project-rail${folderDragActive ? " is-folder-drag" : ""}`}
+      aria-label={t("sidebar.selectProject")}
+      title={folderDragActive ? t("sidebar.dropToAddProject") : undefined}
+      onDragEnter={handleFolderDragEnter}
+      onDragOver={handleFolderDragOver}
+      onDragLeave={handleFolderDragLeave}
+      onDrop={handleFolderDrop}
+    >
       <div className="project-rail-mark" aria-hidden="true">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h4l1.7 2H18.5A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z" />
@@ -2099,12 +2188,17 @@ function ProjectRail({
                   setDropTarget(null);
                 }}
                 onDragOver={(event) => {
+                  // External OS drags (folder drop to add) must fall through
+                  // to the rail-level handlers instead of showing reorder
+                  // insertion markers.
+                  if (isFileDrag(event.dataTransfer)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   const rect = event.currentTarget.getBoundingClientRect();
                   setDropTarget({ key: project.key, after: event.clientY > rect.top + rect.height / 2 });
                 }}
                 onDrop={(event) => {
+                  if (isFileDrag(event.dataTransfer)) return;
                   event.preventDefault();
                   const sourceKey = event.dataTransfer.getData("text/plain") || draggingKey;
                   const after = dropTarget?.key === project.key ? dropTarget.after : false;
@@ -2150,6 +2244,37 @@ function ProjectRail({
       <button type="button" className="project-rail-add" onClick={onAddProject} title={t("sidebar.selectProject")} aria-label={t("sidebar.selectProject")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
       </button>
+      {folderDragActive ? (
+        // Prominent "ready to receive" state covering the whole rail. The
+        // tiles dim behind it; pointer-events stay off so drag events keep
+        // flowing to the nav handlers above.
+        <div className="project-rail-drop-overlay" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h4l1.7 2H18.5A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z" />
+            <line x1="12" y1="10.5" x2="12" y2="15.5" />
+            <line x1="9.5" y1="13" x2="14.5" y2="13" />
+          </svg>
+          <span className="project-rail-drop-text">{t("sidebar.dropToAddProject")}</span>
+        </div>
+      ) : null}
+      {folderDropNotice ? (
+        // Browser limitation notice: the drop carried folders but the browser
+        // cannot turn them into absolute paths. Offer the manual picker
+        // instead of having opened it automatically.
+        <div className="project-rail-drop-notice" role="status">
+          <span>{t("sidebar.dropPathUnavailable")}</span>
+          <button
+            type="button"
+            className="project-rail-drop-notice-action"
+            onClick={() => {
+              onDismissFolderDropNotice();
+              onAddProject();
+            }}
+          >
+            {t("sidebar.selectProject")}
+          </button>
+        </div>
+      ) : null}
     </nav>
   );
 }

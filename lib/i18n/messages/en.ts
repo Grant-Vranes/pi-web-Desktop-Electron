@@ -235,6 +235,8 @@ export const enLocale: LocalePlugin = {
     "sidebar.newSessionTitle": "New session in {path}",
     "sidebar.refresh": "Refresh",
     "sidebar.selectProject": "Select project…",
+    "sidebar.dropToAddProject": "Drop to add project",
+    "sidebar.dropPathUnavailable": "Browsers can't read the dropped folder's real path. Pick it manually instead:",
     "sidebar.filterProjects": "Filter projects…",
     "sidebar.noMatchingProjects": "No matching projects",
     "sidebar.useDefaultDirectory": "Use default directory",
