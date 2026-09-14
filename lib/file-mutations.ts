@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { isExistingFilePathAllowed, isFilePathAllowed } from "./file-access";
 import { isWindowsAbsolutePath, samePath } from "./paths";
+import { moveToTrash } from "./trash";
 
 export class FileMutationError extends Error {
   constructor(
@@ -232,15 +233,17 @@ function executeMutation(
     assertExistingAllowed(sourceParent, allowedRoots);
     const sourceStat = fs.lstatSync(mutation.sourcePath);
     if (sourceStat.isSymbolicLink()) {
-      // Direct symlink: delete the link itself, not its target. The parent
-      // was canonically authorized above; the leaf is removed non-recursively.
+      // Direct symlink: trash the link itself, not its target. The parent
+      // was canonically authorized above; the leaf is trashed non-recursively.
     } else if (!isExistingFilePathAllowed(mutation.sourcePath, allowedRoots)) {
       throw new FileMutationError(403, "Access denied");
     }
-    fs.rmSync(mutation.sourcePath, {
-      recursive: sourceStat.isDirectory(),
-      force: false,
-    });
+    // Move the entry to the OS trash instead of deleting it permanently.
+    try {
+      moveToTrash(mutation.sourcePath);
+    } catch (cause) {
+      throw new Error(cause instanceof Error ? cause.message : "Could not move the entry to the trash", { cause });
+    }
     return { sourcePath: mutation.sourcePath, deleted: true };
   }
 
