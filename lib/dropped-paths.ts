@@ -38,6 +38,23 @@ function isDirectoryItem(item: DataTransferItem | undefined, file: File): boolea
   return entry?.isDirectory === true || file.webkitRelativePath?.endsWith("/") === true;
 }
 
+/**
+ * Resolve an OS file's absolute path, trying every source the runtime can
+ * expose, in order:
+ *   1. piDesktop.getPathForFile (Electron shell) - canonical on the desktop app.
+ *   2. File#path - legacy non-standard Property exposed by older Electron or
+ *      webkit builds where webUtils is unavailable.
+ * Returns "" when no path is readable (plain browser: security block).
+ */
+function resolveNativePath(file: File): string {
+  const withPath = file as File & { path?: string };
+  if (typeof window !== "undefined") {
+    const desktopPath = window.piDesktop?.getPathForFile(file) ?? "";
+    if (desktopPath) return desktopPath;
+  }
+  return withPath.path ?? "";
+}
+
 function formatPathMention({ path, isDirectory }: DroppedPath): string {
   const normalized = isDirectory && !path.endsWith("/") ? `${path}/` : path;
   const escaped = normalized.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
@@ -84,9 +101,7 @@ export function buildDropPayload(dataTransfer: DataTransfer): DropPayload {
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
     if (isImageFile(file)) continue;
-    const nativePath = typeof window === "undefined"
-      ? ""
-      : window.piDesktop?.getPathForFile(file) ?? "";
+    const nativePath = resolveNativePath(file);
     if (!nativePath) continue;
     paths.push({
       path: nativePath,
