@@ -8,16 +8,19 @@ import {
   normalizeDisplayMath,
 } from "@/lib/markdown";
 import { isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
-import type { AgentMessage, AssistantMessage, CustomMessage, TextContent, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantMessage, CustomMessage, TextContent, TurnAnchor, UserMessage } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import styles from "./ChatMinimap.module.css";
 
 interface Props {
   messages: AgentMessage[];
+  entryIds: string[];
+  turnAnchors: TurnAnchor[];
   streamingMessage: Partial<AgentMessage> | null;
   scrollContainer: RefObject<HTMLDivElement | null>;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
   onRevealHistory: () => void;
+  onEnsureEntryLoaded: (entryId: string) => Promise<boolean>;
 }
 
 const MINIMAP_WIDTH = 36;
@@ -32,6 +35,7 @@ interface AssistantPreview {
 }
 
 interface TurnInfo {
+  entryId: string | null;
   userMessage: UserMessage | CustomMessage;
   assistantPreviews: AssistantPreview[];
   scrollTop: number | null;
@@ -41,6 +45,44 @@ interface NodeInfo {
   topRatio: number;
   targetTurn: TurnInfo;
   index: number;
+  key: string;
+}
+
+function makePlaceholderTurn(anchor: TurnAnchor): TurnInfo {
+  return {
+    entryId: anchor.entryId,
+    userMessage: { role: "user", content: anchor.preview } as UserMessage,
+    assistantPreviews: [],
+    scrollTop: null,
+  };
+}
+
+/** Merge measured turns with the full branch anchor list so turns outside the
+ *  loaded message window still get a minimap node. Measured turns win over
+ *  their anchor (they carry assistant previews + scroll position); anchors
+ *  without a measured turn become placeholders; turns missing from the anchor
+ *  list (live streaming tails, legacy sessions) are appended in order. */
+function mergeTurnsWithAnchors(turns: TurnInfo[], anchors: TurnAnchor[]): TurnInfo[] {
+  if (anchors.length === 0) return turns;
+  const turnByEntry = new Map<string, TurnInfo>();
+  for (const turn of turns) {
+    if (turn.entryId && !turnByEntry.has(turn.entryId)) turnByEntry.set(turn.entryId, turn);
+  }
+  const used = new Set<TurnInfo>();
+  const merged: TurnInfo[] = [];
+  for (const anchor of anchors) {
+    const turn = turnByEntry.get(anchor.entryId);
+    if (turn) {
+      used.add(turn);
+      merged.push(turn);
+    } else {
+      merged.push(makePlaceholderTurn(anchor));
+    }
+  }
+  for (const turn of turns) {
+    if (!used.has(turn)) merged.push(turn);
+  }
+  return merged;
 }
 
 function getUserPreview(message: UserMessage | CustomMessage): string {
@@ -191,6 +233,7 @@ function createTurnNodes(turns: TurnInfo[]): NodeInfo[] {
     topRatio: 0,
     targetTurn: turn,
     index,
+    key: turn.entryId ?? `turn-${index}`,
   }));
 }
 
@@ -229,10 +272,13 @@ function layoutNodes(allNodes: NodeInfo[], minimapHeight: number): NodeLayout {
 
 export function ChatMinimap({
   messages,
+  entryIds,
+  turnAnchors,
   streamingMessage,
   scrollContainer,
   messageRefs,
   onRevealHistory,
+  onEnsureEntryLoaded,
 }: Props) {
   const { t } = useI18n();
   const [visible, setVisible] = useState(false);
@@ -256,6 +302,9 @@ export function ChatMinimap({
   const activeNodeLockRef = useRef<{ index: number; until: number } | null>(null);
   const pendingNavigationRef = useRef<{
     nodeIndex: number;
+    /** Prefer resolving the target by entry id — node indices shift when
+     *  earlier pages are prepended while navigation is pending. */
+    entryId?: string;
     target: "user" | "assistant" | "heading";
     assistantIndex?: number;
     headingIndex?: number;
@@ -267,6 +316,11 @@ export function ChatMinimap({
   );
   const allMessagesRef = useRef(allMessages);
   allMessagesRef.current = allMessages;
+
+  const entryIdsRef = useRef(entryIds);
+  entryIdsRef.current = entryIds;
+  const turnAnchorsRef = useRef(turnAnchors);
+  turnAnchorsRef.current = turnAnchors;
 
   const nodeLayout = useMemo(
     () => layoutNodes(allNodes, minimapHeight),
@@ -330,7 +384,10 @@ export function ChatMinimap({
       let refIndex = 0;
       let currentTurn: TurnInfo | null = null;
 
-      for (const message of allMessagesRef.current) {
+      const allCurrent = allMessagesRef.current;
+      const currentEntryIds = entryIdsRef.current;
+      for (let messageIndex = 0; messageIndex < allCurrent.length; messageIndex++) {
+        const message = allCurrent[messageIndex];
         const isAnchor = isMessageGroupAnchor(message);
         if (!isAnchor && message.role !== "assistant") continue;
         const element = refs?.[refIndex];
@@ -340,6 +397,7 @@ export function ChatMinimap({
           currentTurn = null;
           const elementRect = element?.getBoundingClientRect();
           currentTurn = {
+            entryId: currentEntryIds[messageIndex] ?? null,
             userMessage: message as UserMessage | CustomMessage,
             assistantPreviews: [],
             scrollTop: elementRect
@@ -360,7 +418,7 @@ export function ChatMinimap({
         }
       }
 
-      const nextNodes = createTurnNodes(turns);
+      const nextNodes = createTurnNodes(mergeTurnsWithAnchors(turns, turnAnchorsRef.current));
       setMinimapHeight(minimapEl.clientHeight);
       allNodesRef.current = nextNodes;
       setAllNodes(nextNodes);
@@ -368,9 +426,15 @@ export function ChatMinimap({
       syncActiveNode(scrollEl, nextNodes);
 
       const pendingNavigation = pendingNavigationRef.current;
-      const pendingNode = pendingNavigation
-        ? nextNodes[pendingNavigation.nodeIndex]
-        : null;
+      const resolvePendingNode = (): NodeInfo | null => {
+        if (!pendingNavigation) return null;
+        if (pendingNavigation.entryId) {
+          const byEntry = nextNodes.find((node) => node.targetTurn.entryId === pendingNavigation.entryId);
+          if (byEntry) return byEntry;
+        }
+        return nextNodes[pendingNavigation.nodeIndex] ?? null;
+      };
+      const pendingNode = resolvePendingNode();
       if (pendingNavigation && pendingNode) {
         const assistant = pendingNavigation.assistantIndex === undefined
           ? null
@@ -436,15 +500,20 @@ export function ChatMinimap({
       updateScroll();
     }, 50);
     return () => clearTimeout(timeout);
-  }, [messages.length, measureNodes, updateScroll]);
+  }, [messages.length, turnAnchors.length, measureNodes, updateScroll]);
 
   const scrollToNode = useCallback((node: NodeInfo, behavior: ScrollBehavior) => {
     const scrollEl = scrollContainer.current;
     if (!scrollEl) return;
     lockActiveNode(node.index);
     if (node.targetTurn.scrollTop === null) {
-      pendingNavigationRef.current = { nodeIndex: node.index, target: "user" };
+      pendingNavigationRef.current = { nodeIndex: node.index, entryId: node.targetTurn.entryId ?? undefined, target: "user" };
       onRevealHistory();
+      const entryId = node.targetTurn.entryId;
+      // Unloaded turns need server-side pagination before they can be measured.
+      if (entryId && !entryIdsRef.current.includes(entryId)) {
+        void onEnsureEntryLoaded(entryId);
+      }
       return;
     }
     const targetTop = Math.max(
@@ -452,7 +521,7 @@ export function ChatMinimap({
       node.targetTurn.scrollTop - scrollEl.clientHeight * 0.3,
     );
     scrollEl.scrollTo({ top: targetTop, behavior });
-  }, [lockActiveNode, onRevealHistory, scrollContainer]);
+  }, [lockActiveNode, onEnsureEntryLoaded, onRevealHistory, scrollContainer]);
 
   const scrollToAssistant = useCallback((node: NodeInfo, assistantIndex: number) => {
     const scrollEl = scrollContainer.current;
@@ -461,6 +530,7 @@ export function ChatMinimap({
     if (!assistantElement) {
       pendingNavigationRef.current = {
         nodeIndex: node.index,
+        entryId: node.targetTurn.entryId ?? undefined,
         target: "assistant",
         assistantIndex,
       };
@@ -509,6 +579,7 @@ export function ChatMinimap({
     if (!answerElement) {
       pendingNavigationRef.current = {
         nodeIndex: node.index,
+        entryId: node.targetTurn.entryId ?? undefined,
         target: "heading",
         assistantIndex,
         headingIndex,
@@ -613,7 +684,7 @@ export function ChatMinimap({
         const isLocated = nearestNodeIndex === node.index;
         return (
           <div
-            key={node.index}
+            key={node.key}
             ref={(element) => {
               if (element) previewItemRefs.current.set(node.index, element);
               else previewItemRefs.current.delete(node.index);
@@ -721,7 +792,7 @@ export function ChatMinimap({
 
             return (
               <div
-                key={node.index}
+                key={node.key}
                 data-minimap-node-index={node.index}
                 data-minimap-node-active={isActive ? "" : undefined}
                 style={{

@@ -5,7 +5,7 @@ import {
 import { closeSync, type Dirent, fstatSync, openSync, readSync } from "fs";
 import { readdir } from "fs/promises";
 import { isAbsolute, join, normalize as normalizePath, relative, resolve as resolvePath, sep } from "path";
-import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
+import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext, TurnAnchor } from "./types";
 import { normalizeToolCalls } from "./normalize";
 import { getThinkingPreview } from "./message-display";
 import { projectIdentityKey } from "./project-identity";
@@ -490,8 +490,72 @@ export function buildSessionContext(
     entryIds,
     oldestEntryId: sliced[0]?.id ?? null,
     hasMore,
+    turnAnchors: buildTurnAnchors(entries, leafId ?? null),
     ...getSessionSettings(entries, leafId),
   };
+}
+
+const TURN_ANCHOR_PREVIEW_MAX = 160;
+
+function truncatePreview(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= TURN_ANCHOR_PREVIEW_MAX) return trimmed;
+  return `${trimmed.slice(0, TURN_ANCHOR_PREVIEW_MAX)}…`;
+}
+
+function getEntryTurnPreview(entry: SessionEntry): string | null {
+  if (entry.type === "compaction") {
+    return truncatePreview(typeof entry.summary === "string" ? entry.summary : "");
+  }
+  if (entry.type === "message") {
+    const message = entry.message as { role?: string; content?: unknown };
+    if (message.role !== "user") return null;
+    const content = message.content;
+    if (typeof content === "string") return truncatePreview(content);
+    if (Array.isArray(content)) {
+      return truncatePreview(content
+        .filter((block): block is { type: "text"; text: string } => (
+          typeof block === "object" && block !== null
+          && (block as { type?: unknown }).type === "text"
+          && typeof (block as { text?: unknown }).text === "string"
+        ))
+        .map((block) => block.text)
+        .join("\n"));
+    }
+    return null;
+  }
+  if (entry.type === "branch_summary" && typeof entry.summary === "string") {
+    return truncatePreview(entry.summary);
+  }
+  return null;
+}
+
+/** Walk the full active branch (oldest first) and collect one anchor per turn:
+ *  user messages, compaction summaries, and branch summaries. Covers entries
+ *  outside the paged message window so the minimap can render every turn. */
+function buildTurnAnchors(entries: SessionEntry[], leafId: string | null): TurnAnchor[] {
+  const byId = new Map<string, SessionEntry>();
+  for (const e of entries) byId.set(e.id, e);
+
+  let current = leafId ? byId.get(leafId) : entries[entries.length - 1];
+  const chain: SessionEntry[] = [];
+  while (current) {
+    chain.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  chain.reverse();
+
+  const anchors: TurnAnchor[] = [];
+  for (const entry of chain) {
+    const preview = getEntryTurnPreview(entry);
+    if (preview === null) continue;
+    anchors.push({
+      entryId: entry.id,
+      kind: entry.type === "compaction" ? "compaction" : "user",
+      preview,
+    });
+  }
+  return anchors;
 }
 
 /**

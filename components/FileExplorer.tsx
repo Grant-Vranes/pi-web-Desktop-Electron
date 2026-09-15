@@ -831,6 +831,32 @@ function ChangeRow({
   );
 }
 
+const EXPANDED_PATHS_STORAGE_PREFIX = "pi-file-explorer-expanded:";
+
+function readStoredExpandedPaths(cwd: string): Set<string> | null {
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_PATHS_STORAGE_PREFIX + cwd);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return new Set(parsed.filter((entry): entry is string => typeof entry === "string"));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredExpandedPaths(cwd: string, paths: Set<string>): void {
+  try {
+    if (paths.size === 0) {
+      window.localStorage.removeItem(EXPANDED_PATHS_STORAGE_PREFIX + cwd);
+    } else {
+      window.localStorage.setItem(EXPANDED_PATHS_STORAGE_PREFIX + cwd, JSON.stringify([...paths]));
+    }
+  } catch {
+    // Storage unavailable or full — collapse state simply won't persist.
+  }
+}
+
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
   onOpenFile,
@@ -886,6 +912,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return roots[0]?.fullPath ?? null;
   }, [lastContextEntry, roots]);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
+
+  // Persist the expansion state per cwd so it survives project switches and reloads.
+  useEffect(() => {
+    writeStoredExpandedPaths(cwd, expandedPaths);
+  }, [cwd, expandedPaths]);
+
   const uploadBusy = uploadPhase !== "idle";
   const hasSearchQuery = searchQuery.trim().length > 0;
 
@@ -1256,9 +1288,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     const cwdChanged = prevCwdRef.current !== cwd;
     prevCwdRef.current = cwd;
 
-    // Reset expanded state only when cwd changes, not on refreshKey bumps
+    // Reset expanded state only when cwd changes, not on refreshKey bumps.
+    // Restore the persisted expansion state for this cwd so switching between
+    // projects keeps each project's folder expansion as the user left it.
     if (cwdChanged) {
-      setExpandedPaths(new Set());
+      const restored = readStoredExpandedPaths(cwd);
+      setExpandedPaths(restored ?? new Set());
       setHighlightedPaths(new Set());
       setUploadSummary(null);
       setPendingConflict(null);

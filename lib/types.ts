@@ -350,11 +350,22 @@ export interface SessionInfo {
   archived?: boolean;
 }
 
+export interface TurnAnchor {
+  /** Session entry id of the anchor message (user / compaction / branch summary). */
+  entryId: string;
+  kind: "user" | "compaction";
+  /** Plain-text preview of the turn's opening message, truncated. */
+  preview: string;
+}
+
 export interface SessionContext {
   messages: AgentMessage[];
   entryIds: string[]; // parallel to messages — the session entry id for each message
   oldestEntryId: string | null;
   hasMore: boolean;
+  /** Every turn anchor on the active branch, oldest first — including entries
+   *  beyond the paged `messages` window, so the minimap can show all turns. */
+  turnAnchors?: TurnAnchor[];
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
 }

@@ -10,6 +10,7 @@ import type {
   SessionInfo,
   SessionTreeNode,
   ToolResultMessage,
+  TurnAnchor,
   UserMessage,
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
@@ -46,6 +47,7 @@ export interface SessionData {
     entryIds: string[];
     oldestEntryId: string | null;
     hasMore: boolean;
+    turnAnchors?: TurnAnchor[];
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
   };
@@ -292,6 +294,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [hasEarlierMessages, setHasEarlierMessages] = useState(false);
+  // Mirror of the pagination window so callbacks can read it without re-creation.
+  const historyWindowRef = useRef({ entryIds, historyCursor, hasEarlierMessages });
+  historyWindowRef.current = { entryIds, historyCursor, hasEarlierMessages };
   const [streamState, dispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
   const [agentRunning, setAgentRunning] = useState(false);
   const [bashRunning, setBashRunning] = useState(false);
@@ -577,6 +582,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!options?.signal?.aborted) console.error("Failed to load context:", e);
     }
   }, []);
+
+  /** Page upward until `entryId` is present in the loaded messages. Returns
+   *  false when the entry could not be reached (unknown id or no more pages). */
+  const ensureEntryLoaded = useCallback(async (entryId: string): Promise<boolean> => {
+    const sid = sessionIdRef.current;
+    if (!sid) return false;
+    for (let page = 0; page < 500; page++) {
+      if (historyWindowRef.current.entryIds.includes(entryId)) return true;
+      const { hasEarlierMessages: hasMore, historyCursor: cursor } = historyWindowRef.current;
+      if (!hasMore || !cursor) return historyWindowRef.current.entryIds.includes(entryId);
+      await loadContext(sid, null, cursor);
+    }
+    return false;
+  }, [loadContext]);
 
   const loadTools = useCallback(async (sid: string) => {
     try {
@@ -2186,7 +2205,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleBuiltinSlashCommand,
     setNoticePaused: setPausedNoticeId,
     addNotice,
-    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext, ensureEntryLoaded,
     scrollToBottom, scrollUserMsgToTop, scrollToMessage,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,
