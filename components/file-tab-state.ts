@@ -156,3 +156,56 @@ export function saveFileViewerState(
   next[index] = { ...next[index], viewerState };
   return next;
 }
+
+// --- Per-project file tab persistence ---------------------------------------
+
+const PROJECT_FILE_TABS_PREFIX = "pi-file-tabs:";
+
+function sanitizeTabForStorage(tab: Tab): Tab {
+  // Unsaved editor drafts can be large and are already persisted per session
+  // draft; drop them from the per-project snapshot to keep storage light.
+  const viewerState = tab.viewerState
+    ? { ...tab.viewerState, draft: null }
+    : undefined;
+  return { ...tab, closing: false, viewerState };
+}
+
+export function saveProjectFileTabs(
+  projectKey: string,
+  tabs: Tab[],
+  activeTabId: string | null,
+): void {
+  try {
+    if (tabs.length === 0) {
+      window.localStorage.removeItem(PROJECT_FILE_TABS_PREFIX + projectKey);
+      return;
+    }
+    const payload = { tabs: tabs.map(sanitizeTabForStorage), activeTabId };
+    window.localStorage.setItem(
+      PROJECT_FILE_TABS_PREFIX + projectKey,
+      JSON.stringify(payload),
+    );
+  } catch { /* storage is optional */ }
+}
+
+export function loadProjectFileTabs(
+  projectKey: string,
+): { tabs: Tab[]; activeTabId: string | null } | null {
+  try {
+    const raw = window.localStorage.getItem(PROJECT_FILE_TABS_PREFIX + projectKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { tabs?: Tab[]; activeTabId?: unknown };
+    if (!Array.isArray(parsed.tabs)) return null;
+    const tabs = parsed.tabs
+      .filter((tab): tab is Tab =>
+        Boolean(tab) && typeof tab.id === "string" && typeof tab.filePath === "string")
+      .map((tab) => ({ ...tab, closing: false, viewerRevision: 0 }));
+    const activeTabId = typeof parsed.activeTabId === "string"
+      && tabs.some((tab) => tab.id === parsed.activeTabId)
+      ? parsed.activeTabId
+      : tabs[0]?.id ?? null;
+    return { tabs, activeTabId };
+  } catch {
+    return null;
+  }
+}

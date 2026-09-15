@@ -500,6 +500,13 @@ function TreeNode({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
 
+  // Load children when the directory is open but not yet loaded — e.g. right
+  // after the expansion state was restored from a previous session.
+  useEffect(() => {
+    if (open && !loaded) loadChildren();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const handleClick = useCallback(() => {
     onSelect?.(node.fullPath);
     if (node.isDir) {
@@ -912,12 +919,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return roots[0]?.fullPath ?? null;
   }, [lastContextEntry, roots]);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
-
-  // Persist the expansion state per cwd so it survives project switches and reloads.
-  useEffect(() => {
-    writeStoredExpandedPaths(cwd, expandedPaths);
-  }, [cwd, expandedPaths]);
-
   const uploadBusy = uploadPhase !== "idle";
   const hasSearchQuery = searchQuery.trim().length > 0;
 
@@ -1013,9 +1014,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setExpandedPaths((prev) => {
       const next = new Set(prev);
       if (open) next.add(fullPath); else next.delete(fullPath);
+      // Persist per cwd so the expansion state survives project switches.
+      writeStoredExpandedPaths(cwd, next);
       return next;
     });
-  }, []);
+  }, [cwd]);
 
   const openContextMenu = useCallback((target: FileNode, event: React.MouseEvent, isRoot = false) => {
     event.preventDefault();
@@ -1038,6 +1041,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       return;
     }
     setSelectedPath(path);
+    // Expand the ancestor chain and persist it per cwd.
     setExpandedPaths((prev) => {
       const next = new Set(prev);
       let dir = getFileDirectory(path);
@@ -1047,6 +1051,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         if (sameFilePath(parent, dir)) break;
         dir = parent;
       }
+      if (next.size !== prev.size) writeStoredExpandedPaths(cwd, next);
       return next.size === prev.size ? prev : next;
     });
   }, [cwd]);

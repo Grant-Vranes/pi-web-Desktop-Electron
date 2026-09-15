@@ -12,7 +12,9 @@ import { TabBar, type Tab } from "./TabBar";
 import {
   applyFileTabMutation,
   getNextActiveFileTabId,
+  loadProjectFileTabs,
   openFileTab,
+  saveProjectFileTabs,
   saveFileViewerState,
   type FileTabMutation,
 } from "./file-tab-state";
@@ -749,12 +751,21 @@ export function AppShell() {
     setSystemInfoLoading(false);
     setActiveTopPanel(null);
     if (currentProject !== newProject) {
-      // File tabs are keyed by absolute path, so tabs opened in the previous
-      // project must not linger. Same-project worktree switches keep them.
-      fileTabsRef.current = [];
-      activeFileTabIdRef.current = null;
-      setFileTabs([]);
-      if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
+      // Persist the outgoing project's open file tabs (without unsaved
+      // drafts) and restore the incoming project's snapshot instead of just
+      // dropping them, so switching back brings the preview tabs back.
+      if (currentProject) {
+        saveProjectFileTabs(currentProject, fileTabsRef.current, activeFileTabIdRef.current);
+      }
+      const restored = loadProjectFileTabs(newProject);
+      const restoredTabs = restored?.tabs ?? [];
+      fileTabsRef.current = restoredTabs;
+      activeFileTabIdRef.current = restored?.activeTabId ?? null;
+      setFileTabs(restoredTabs);
+      if (activeFileTabIdRef.current) {
+        setActiveFileTabId(activeFileTabIdRef.current);
+        setRightPanelOpen(true);
+      } else if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
         setActiveFileTabId(null);
         setRightPanelOpen(false);
       }
@@ -777,8 +788,22 @@ export function AppShell() {
     // Adopt an explicitly selected session before the sidebar reports its cwd.
     const projectKey = workspaceKeyOf(session);
     if (activeProjectKeyRef.current !== projectKey) {
-      setFileTabs([]);
-      if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
+      // Persist the outgoing project's tabs and restore the incoming one.
+      if (activeProjectKeyRef.current) {
+        saveProjectFileTabs(
+          activeProjectKeyRef.current,
+          fileTabsRef.current,
+          activeFileTabIdRef.current,
+        );
+      }
+      const restored = loadProjectFileTabs(projectKey);
+      fileTabsRef.current = restored?.tabs ?? [];
+      activeFileTabIdRef.current = restored?.activeTabId ?? null;
+      setFileTabs(fileTabsRef.current);
+      if (activeFileTabIdRef.current) {
+        setActiveFileTabId(activeFileTabIdRef.current);
+        setRightPanelOpen(true);
+      } else if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
         setActiveFileTabId(null);
         setRightPanelOpen(false);
       }
@@ -1062,6 +1087,7 @@ export function AppShell() {
     // deleted folder is neither left selected nor its rail tile reappears.
     invalidateWorkspaceRestore();
     setRefreshKey((k) => k + 1);
+    if (activeProjectKeyRef.current) saveProjectFileTabs(activeProjectKeyRef.current, [], null);
     const draftId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
