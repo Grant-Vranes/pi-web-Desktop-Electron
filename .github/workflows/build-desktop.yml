@@ -93,13 +93,19 @@ jobs:
           merge-multiple: true
 
       - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
-            dist/*.deb
-            dist/latest*.yml
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          FILES=$(ls dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb dist/latest*.yml 2>/dev/null || true)
+          if [ -z "$FILES" ]; then
+            echo "No release assets found"; exit 1
+          fi
+          # Create release if it doesn't exist, otherwise just append/overwrite assets
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists, uploading assets"
+            gh release upload "$GITHUB_REF_NAME" $FILES --clobber
+          else
+            echo "Creating release $GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" $FILES --generate-notes --title "$GITHUB_REF_NAME"
+          fi
