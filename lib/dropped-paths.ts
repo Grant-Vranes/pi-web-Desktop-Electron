@@ -9,6 +9,10 @@ export interface DropPayload {
   hasNonImageFiles: boolean;
   /** Absolute paths dragged from the in-app file explorer (@ mention targets). */
   internalPaths: DroppedPath[];
+  /** True when the drop carried an OS directory whose absolute path could not
+   *  be resolved (plain browser). Lets the caller fall back to uploading the
+   *  folder contents instead of showing a path error. */
+  hasUnresolvedDirectory: boolean;
 }
 
 // Drag types set by the FileExplorer tree rows so a file dragged onto the
@@ -71,22 +75,29 @@ function uniquePaths(paths: DroppedPath[]): DroppedPath[] {
 
 export function buildDropPayload(dataTransfer: DataTransfer): DropPayload {
   const files = Array.from(dataTransfer.files);
+  const items = Array.from(dataTransfer.items ?? []);
   const imageFiles = files.filter(isImageFile);
   const nonImageFiles = files.filter((file) => !isImageFile(file));
   const hasNonImageFiles = nonImageFiles.length > 0;
   const paths: DroppedPath[] = [];
 
-  for (const file of nonImageFiles) {
-    const index = files.indexOf(file);
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    if (isImageFile(file)) continue;
     const nativePath = typeof window === "undefined"
       ? ""
       : window.piDesktop?.getPathForFile(file) ?? "";
     if (!nativePath) continue;
     paths.push({
       path: nativePath,
-      isDirectory: isDirectoryItem(dataTransfer.items[index], file),
+      isDirectory: isDirectoryItem(items[index], file),
     });
   }
+
+  // A directory entry yields no native path in a plain browser (no piDesktop),
+  // so flag it: the caller can fall back to uploading the folder contents.
+  const hasUnresolvedDirectory = items.some((item) => item?.webkitGetAsEntry?.()?.isDirectory === true)
+    && paths.every((entry) => !entry.isDirectory);
 
   if (paths.length === 0 && hasNonImageFiles) {
     for (const value of fileUrls(dataTransfer.getData("text/uri-list"))) {
@@ -104,5 +115,6 @@ export function buildDropPayload(dataTransfer: DataTransfer): DropPayload {
     hasNonImageFiles: hasNonImageFiles || (internalPaths.length > 0),
     pathMentions: uniquePaths(paths).map(formatPathMention).join(""),
     internalPaths,
+    hasUnresolvedDirectory,
   };
 }

@@ -7,7 +7,7 @@ import { buildDropPayload, type DropPayload } from "@/lib/dropped-paths";
 // drop zone active before the drop event fires.
 const INTERNAL_FILE_DRAG_TYPE = "application/x-pi-web-file-path";
 
-export function useDragDrop(onDrop: (payload: DropPayload) => void) {
+export function useDragDrop(onDrop: (payload: DropPayload, dataTransfer: DataTransfer) => void) {
   const [isDragOver, setIsDragOver] = useState(false);
   const counterRef = useRef(0);
 
@@ -40,11 +40,11 @@ export function useDragDrop(onDrop: (payload: DropPayload) => void) {
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     const payload = buildDropPayload(e.dataTransfer);
-    if (payload.imageFiles.length === 0 && !payload.hasNonImageFiles) return;
+    if (payload.imageFiles.length === 0 && !payload.hasNonImageFiles && !payload.hasUnresolvedDirectory) return;
     e.preventDefault();
     counterRef.current = 0;
     setIsDragOver(false);
-    onDrop(payload);
+    onDrop(payload, e.dataTransfer);
   }, [onDrop]);
 
   return { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop };

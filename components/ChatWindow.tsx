@@ -20,6 +20,8 @@ import { useDragDrop } from "@/hooks/useDragDrop";
 import type { DropPayload } from "@/lib/dropped-paths";
 import { buildAtMentionText } from "@/lib/file-fuzzy";
 import { getRelativeFilePath } from "@/lib/file-paths";
+import { encodeFilePathForApi } from "@/lib/file-paths";
+import { collectDroppedUploadEntries } from "@/lib/drop-collect";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useProjectAliases } from "@/hooks/useProjectAliases";
 import { projectDisplayName } from "@/lib/project-alias";
@@ -36,6 +38,11 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+
+// Matches the file-explorer upload limits so an imported folder fails fast
+// client-side instead of hitting the server's 25MB / 100MB caps.
+const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
 
 interface Props {
   session: SessionInfo | null;
@@ -283,7 +290,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const [restoreAnchorReady, setRestoreAnchorReady] = useState(false);
 
   const {
-    loading, error, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
+    loading, error, data, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
@@ -299,7 +306,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleRecallQueue,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop,
-    loadContext, activeLeafId, scrollToBottom, scrollToMessage,
+    loadContext, ensureEntryLoaded, activeLeafId, scrollToBottom, scrollToMessage,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
@@ -842,7 +849,45 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [ctxKey, onContextUsageChange]);
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
-  const onDrop = useCallback(({ imageFiles, pathMentions, hasNonImageFiles, internalPaths }: DropPayload) => {
+  const importDroppedFolder = useCallback(async (dataTransfer: DataTransfer) => {
+    const cwd = activeCwd ?? session?.cwd ?? null;
+    if (!cwd) {
+      addNotice({ type: "warning", message: "Select a project before importing a folder" });
+      return;
+    }
+    const { entries } = await collectDroppedUploadEntries(dataTransfer);
+    if (entries.length === 0) {
+      addNotice({ type: "warning", message: "This browser could not read the dropped folder's contents" });
+      return;
+    }
+    let total = 0;
+    for (const entry of entries) total += entry.file.size;
+    if (entries.some((entry) => entry.file.size > MAX_UPLOAD_FILE_BYTES) || total > MAX_UPLOAD_TOTAL_BYTES) {
+      addNotice({ type: "warning", message: "Dropped folder is too large to import" });
+      return;
+    }
+    const formData = new FormData();
+    for (const entry of entries) formData.append("files", entry.file, entry.relativePath);
+    try {
+      const response = await fetch(`/api/files/${encodeFilePathForApi(cwd)}?type=upload&conflict=overwrite`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({})) as { uploaded?: string[]; error?: string };
+      if (!response.ok) throw new Error(data.error ?? `Import failed (HTTP ${response.status})`);
+      const uploaded = data.uploaded ?? [];
+      if (uploaded.length > 0) {
+        const mentions = uploaded.map((path) => buildAtMentionText(path, false)).join("");
+        chatInputRef?.current?.insertText(mentions);
+      } else {
+        addNotice({ type: "warning", message: "No files were imported from the dropped folder" });
+      }
+    } catch (error) {
+      addNotice({ type: "warning", message: error instanceof Error ? error.message : "Import failed" });
+    }
+  }, [activeCwd, addNotice, chatInputRef, session?.cwd]);
+
+  const onDrop = useCallback(({ imageFiles, pathMentions, hasNonImageFiles, internalPaths, hasUnresolvedDirectory }: DropPayload, dataTransfer: DataTransfer) => {
     if (imageFiles.length > 0) chatInputRef?.current?.addImages(imageFiles);
 
     // Internal drags from the file explorer carry absolute paths that the
@@ -860,8 +905,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       chatInputRef?.current?.insertPathMentions(pathMentions);
       return;
     }
+
+    // An OS folder dropped in a plain browser has no readable local path, so
+    // import its contents into the project and mention the created files.
+    if (hasUnresolvedDirectory) {
+      void importDroppedFolder(dataTransfer);
+      return;
+    }
+
     if (hasNonImageFiles) addNotice({ type: "warning", message: "Could not access the dropped item's local path in this browser" });
-  }, [activeCwd, addNotice, chatInputRef, session?.cwd]);
+  }, [activeCwd, addNotice, chatInputRef, importDroppedFolder, session?.cwd]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
@@ -1382,10 +1435,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {isMobile || pendingScrollRestore ? null : (
           <ChatMinimap
             messages={messages}
+            entryIds={entryIds}
+            turnAnchors={data?.context.turnAnchors ?? []}
             streamingMessage={streamState.streamingMessage}
             scrollContainer={scrollContainerRef}
             messageRefs={messageRefs}
             onRevealHistory={revealHistoryForMinimap}
+            onEnsureEntryLoaded={ensureEntryLoaded}
           />
         )}
         </>}

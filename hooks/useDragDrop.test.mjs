@@ -6,10 +6,10 @@ const source = await readFile(new URL("./useDragDrop.ts", import.meta.url), "utf
 
 test("routes classified image and local-path payloads through one drop callback", () => {
   assert.match(source, /import \{ buildDropPayload, type DropPayload \} from "@\/lib\/dropped-paths"/);
-  assert.match(source, /useDragDrop\(onDrop: \(payload: DropPayload\) => void\)/);
+  assert.match(source, /useDragDrop\(onDrop: \(payload: DropPayload, dataTransfer: DataTransfer\) => void\)/);
   assert.match(source, /const payload = buildDropPayload\(e\.dataTransfer\)/);
-  assert.match(source, /if \(payload\.imageFiles\.length === 0 && !payload\.hasNonImageFiles\) return/);
-  assert.match(source, /counterRef\.current = 0;\s*setIsDragOver\(false\);\s*onDrop\(payload\)/);
+  assert.match(source, /if \(payload\.imageFiles\.length === 0 && !payload\.hasNonImageFiles && !payload\.hasUnresolvedDirectory\) return/);
+  assert.match(source, /counterRef\.current = 0;\s*setIsDragOver\(false\);\s*onDrop\(payload, e\.dataTransfer\)/);
 });
 
 test("keeps the drop zone active for internal file-explorer drags", () => {
