@@ -18,6 +18,8 @@ import { useI18n } from "@/hooks/useI18n";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import type { DropPayload } from "@/lib/dropped-paths";
+import { buildAtMentionText } from "@/lib/file-fuzzy";
+import { getRelativeFilePath } from "@/lib/file-paths";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useProjectAliases } from "@/hooks/useProjectAliases";
 import { projectDisplayName } from "@/lib/project-alias";
@@ -840,14 +842,26 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [ctxKey, onContextUsageChange]);
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
-  const onDrop = useCallback(({ imageFiles, pathMentions, hasNonImageFiles }: DropPayload) => {
+  const onDrop = useCallback(({ imageFiles, pathMentions, hasNonImageFiles, internalPaths }: DropPayload) => {
     if (imageFiles.length > 0) chatInputRef?.current?.addImages(imageFiles);
+
+    // Internal drags from the file explorer carry absolute paths that the
+    // agent resolves relative to the session cwd, so rewrite them as @mentions.
+    if (internalPaths.length > 0) {
+      const cwd = activeCwd ?? session?.cwd ?? undefined;
+      const mentions = internalPaths
+        .map(({ path, isDirectory }) => buildAtMentionText(getRelativeFilePath(path, cwd), isDirectory))
+        .join("");
+      if (mentions) chatInputRef?.current?.insertText(mentions);
+      return;
+    }
+
     if (pathMentions) {
       chatInputRef?.current?.insertPathMentions(pathMentions);
       return;
     }
     if (hasNonImageFiles) addNotice({ type: "warning", message: "Could not access the dropped item's local path in this browser" });
-  }, [addNotice, chatInputRef]);
+  }, [activeCwd, addNotice, chatInputRef, session?.cwd]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 

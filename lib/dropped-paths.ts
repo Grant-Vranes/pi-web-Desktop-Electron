@@ -7,7 +7,15 @@ export interface DropPayload {
   imageFiles: File[];
   pathMentions: string;
   hasNonImageFiles: boolean;
+  /** Absolute paths dragged from the in-app file explorer (@ mention targets). */
+  internalPaths: DroppedPath[];
 }
+
+// Drag types set by the FileExplorer tree rows so a file dragged onto the
+// chat input (or another explorer node) can be identified as an internal
+// @-mention rather than an OS file upload. Keep in sync with FileExplorer.
+const INTERNAL_FILE_DRAG_TYPE = "application/x-pi-web-file-path";
+const INTERNAL_DIRECTORY_DRAG_TYPE = "application/x-pi-web-file-is-directory";
 
 declare global {
   interface Window {
@@ -87,9 +95,14 @@ export function buildDropPayload(dataTransfer: DataTransfer): DropPayload {
     }
   }
 
+  const internalPaths: DroppedPath[] = (dataTransfer.types ?? []).includes(INTERNAL_FILE_DRAG_TYPE)
+    ? [{ path: dataTransfer.getData(INTERNAL_FILE_DRAG_TYPE), isDirectory: dataTransfer.getData(INTERNAL_DIRECTORY_DRAG_TYPE) === "true" }].filter((entry) => entry.path)
+    : [];
+
   return {
     imageFiles,
-    hasNonImageFiles,
+    hasNonImageFiles: hasNonImageFiles || (internalPaths.length > 0),
     pathMentions: uniquePaths(paths).map(formatPathMention).join(""),
+    internalPaths,
   };
 }

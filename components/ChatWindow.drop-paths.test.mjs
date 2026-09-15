@@ -5,10 +5,18 @@ import test from "node:test";
 const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
 
 test("partitions dropped images and path mentions without uploading path items", () => {
-  assert.match(source, /const onDrop = useCallback\(\(\{ imageFiles, pathMentions, hasNonImageFiles \}: DropPayload\) => \{/);
+  assert.match(source, /const onDrop = useCallback\(\(\{ imageFiles, pathMentions, hasNonImageFiles, internalPaths \}: DropPayload\) => \{/);
   assert.match(source, /if \(imageFiles\.length > 0\) chatInputRef\?\.current\?\.addImages\(imageFiles\);/);
   assert.match(source, /if \(pathMentions\) \{\s*chatInputRef\?\.current\?\.insertPathMentions\(pathMentions\);\s*return;\s*}/);
   assert.match(source, /if \(hasNonImageFiles\) addNotice\(\{ type: "warning", message: "Could not access the dropped item's local path in this browser" \}\);/);
+});
+
+test("rewrites internal file-explorer drags as relative @mentions", () => {
+  assert.match(source, /internalPaths\.length > 0/);
+  assert.match(source, /buildAtMentionText\(getRelativeFilePath\(path, cwd\), isDirectory\)/);
+  assert.match(source, /chatInputRef\?\.current\?\.insertText\(mentions\)/);
+  assert.match(source, /import \{ buildAtMentionText \} from "@\/lib\/file-fuzzy"/);
+  assert.match(source, /import \{ getRelativeFilePath \} from "@\/lib\/file-paths"/);
 });
 
 test("uses a generic path-or-image drop affordance", () => {
