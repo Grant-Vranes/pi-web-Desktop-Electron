@@ -319,7 +319,8 @@ test("shows and locks the optimistic model while a switch is pending", () => {
   assert.match(html, /title="Switching model"/);
   assert.match(html, /aria-busy="true"/);
   assert.match(html, /disabled=""/);
-  assert.match(html, />DeepSeek V4 Flash</);
+  // Selected display includes the provider (original casing when provided).
+  assert.match(html, />deepseek\/DeepSeek V4 Flash</);
   assert.match(html, /animation:spin 0\.8s linear infinite/);
 });
 

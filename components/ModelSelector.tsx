@@ -6,6 +6,8 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface ModelSelectorOption {
   provider: string;
+  /** Provider display name (e.g. "Anthropic"); falls back to `provider` id. */
+  providerName?: string;
   modelId: string;
   name: string;
 }
@@ -32,6 +34,10 @@ function compareModelOptions(a: ModelSelectorOption, b: ModelSelectorOption): nu
   return MODEL_OPTION_COLLATOR.compare(a.name || a.modelId, b.name || b.modelId)
     || MODEL_OPTION_COLLATOR.compare(a.provider, b.provider)
     || MODEL_OPTION_COLLATOR.compare(a.modelId, b.modelId);
+}
+
+function providerLabel(option: ModelSelectorOption): string {
+  return option.providerName || option.provider;
 }
 
 export function filterModelOptions(options: ModelSelectorOption[], query: string): ModelSelectorOption[] {
@@ -78,8 +84,18 @@ export function ModelSelector({
     else modelsByProvider.push({ provider: option.provider, options: [option] });
   }
 
+  // Selected-model display: the trigger shows "provider/name" by default so
+  // the same model name under different providers stays distinguishable. The
+  // provider keeps its original display name and casing (e.g. "Anthropic").
   const currentName = selectedLabel ?? (value
-    ? sortedOptions.find((option) => option.modelId === value.modelId && option.provider === value.provider)?.name ?? value.modelId
+    ? (() => {
+        const match = sortedOptions.find((option) => option.modelId === value.modelId && option.provider === value.provider);
+        const provider = match
+          ? providerLabel(match)
+          : sortedOptions.find((option) => option.provider === value.provider)?.providerName ?? value.provider;
+        const name = match?.name ?? value.modelId;
+        return provider ? `${provider}/${name}` : name;
+      })()
     : emptyLabel ?? (sortedOptions.length > 0 ? "Select model" : "No models"));
 
   useEffect(() => {
@@ -126,7 +142,8 @@ export function ModelSelector({
         justifyContent: isMobile ? "flex-start" : undefined,
         gap: 6,
         width: isMobile ? "100%" : undefined,
-        maxWidth: isMobile ? "100%" : 220,
+        // Desktop: no max width — the full "provider/model" label stays visible.
+        maxWidth: isMobile ? "100%" : undefined,
         height: 32,
         padding: isMobile ? "8px 10px" : "8px 12px",
         overflow: "hidden",
@@ -293,8 +310,8 @@ export function ModelSelector({
               ) : modelsByProvider.map((group, index) => (
                 <div key={group.provider}>
                   {modelsByProvider.length > 1 && (
-                    <div style={{ padding: "6px 12px 4px", borderTop: index > 0 || onClear ? "1px solid var(--border)" : "none", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, letterSpacing: 0, textTransform: "uppercase" }}>
-                      {group.provider}
+                    <div style={{ padding: "6px 12px 4px", borderTop: index > 0 || onClear ? "1px solid var(--border)" : "none", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, letterSpacing: 0 }}>
+                      {providerLabel(group.options[0])}
                     </div>
                   )}
                   {group.options.map((option) => (

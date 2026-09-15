@@ -51,10 +51,14 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     settings.getEnabledModels(),
   );
   const { visible, thinkingLevelPins, warnings } = scope;
+  // Providers carry a display name (e.g. "Anthropic") distinct from their id
+  // ("anthropic"); attach it so the UI can show the original casing.
+  const providerNames = new Map(services.modelRuntime.getProviders().map((p) => [p.id, p.name] as const));
   modelList = visible.map((m) => ({
     id: m.id,
     name: m.name,
     provider: m.provider,
+    ...(providerNames.has(m.provider) ? { providerName: providerNames.get(m.provider) } : {}),
     input: m.input,
   })).sort(compareModelEntries);
   for (const m of visible) {
