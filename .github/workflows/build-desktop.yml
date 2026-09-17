@@ -96,6 +96,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
           FILES=$(ls dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb dist/latest*.yml 2>/dev/null || true)
           if [ -z "$FILES" ]; then
