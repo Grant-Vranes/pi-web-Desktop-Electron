@@ -1070,6 +1070,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onSelectSession(s, false, entryId, blockIndex);
   }, [onSelectSession]);
 
+  const handleSelectSessionFromRail = useCallback((s: SessionInfo) => {
+    setScrollTargetSessionId(s.id);
+    handleSelectSessionFromList(s);
+  }, [handleSelectSessionFromList]);
+
   const handleNewSession = useCallback(() => {
     if (!selectedCwd) return;
     // Generate a temporary UUID client-side — no backend call needed.
@@ -1324,6 +1329,32 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     seededRef.current = true;
   }, [sessionDayGroups]);
 
+  const [scrollTargetSessionId, setScrollTargetSessionId] = useState<string | null>(null);
+  const conversationsListRef = useRef<HTMLDivElement>(null);
+  // Jumping to a session from the project-rail tooltip: expand the day group
+  // holding it (if collapsed), then scroll its row to the top of the visible
+  // list so the selected record is always in view.
+  useEffect(() => {
+    if (!scrollTargetSessionId) return;
+    const group = sessionDayGroups.find((g) =>
+      g.families.some((f) => [f.root.id, ...f.subagents.map((s) => s.id)].includes(scrollTargetSessionId)),
+    );
+    if (group && collapsedDayGroups.has(group.dateKey)) {
+      setCollapsedDayGroups((prev) => {
+        const next = new Set(prev);
+        next.delete(group.dateKey);
+        return next;
+      });
+      return; // re-run after the group renders expanded
+    }
+    const raf = requestAnimationFrame(() => {
+      const row = conversationsListRef.current?.querySelector(`[data-session-id="${scrollTargetSessionId}"]`);
+      row?.scrollIntoView({ block: "start" });
+      setScrollTargetSessionId(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scrollTargetSessionId, sessionDayGroups, collapsedDayGroups]);
+
   return (
     <div className="project-sidebar-shell" style={{ display: "flex", height: "100%", overflow: "hidden" }}>
       {customPathOpen && (
@@ -1341,12 +1372,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       <ProjectRail
         projects={railProjects}
         selectedProjectKey={selectedProject?.key ?? null}
+        selectedSessionId={selectedSessionId}
         activity={projectActivity}
         allSessions={allSessions}
         runningSessionIds={runningSessionIds}
         runningSessionDetails={runningSessionDetails}
         unreadSessionIds={unreadSessionIds}
         onSelect={selectProject}
+        onSelectSession={handleSelectSessionFromRail}
         onAddProject={handleCustomPathClick}
         onAddDroppedFolders={handleDroppedProjectFolders}
         folderDropNotice={folderDropNotice}
@@ -1710,7 +1743,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </ToolbarIconButton>
         </div>
       </div>
-      <div className="sidebar-conversations-list" style={{ flex: "1 1 auto", overflowY: "auto", padding: "0", minHeight: 0 }}>
+      <div ref={conversationsListRef} className="sidebar-conversations-list" style={{ flex: "1 1 auto", overflowY: "auto", padding: "0", minHeight: 0 }}>
       <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} refreshKey={sessionListVersion} selectedSessionId={selectedSessionId} onSelectSession={handleSelectSessionFromList}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
@@ -2039,12 +2072,14 @@ type ProjectDeleteOutcome =
 function ProjectRail({
   projects,
   selectedProjectKey,
+  selectedSessionId,
   activity,
   allSessions,
   runningSessionIds,
   runningSessionDetails,
   unreadSessionIds,
   onSelect,
+  onSelectSession,
   onAddProject,
   onAddDroppedFolders,
   folderDropNotice,
@@ -2056,12 +2091,16 @@ function ProjectRail({
 }: {
   projects: readonly ProjectSelection[];
   selectedProjectKey: string | null;
+  /** Highlights the currently open session's card in the tooltip list. */
+  selectedSessionId: string | null;
   activity: ReadonlyMap<string, { running: number; unread: number }>;
   allSessions: readonly SessionInfo[];
   runningSessionIds: ReadonlySet<string>;
   runningSessionDetails: readonly RunningRpcSessionDetail[];
   unreadSessionIds: ReadonlySet<string>;
   onSelect: (project: ProjectSelection) => void;
+  /** Jump straight to a session from the tooltip card. */
+  onSelectSession: (s: SessionInfo) => void;
   onAddProject: () => void;
   /** Handles OS folder drops on the rail; see handleDroppedProjectFolders. */
   onAddDroppedFolders: (dropped: DroppedFolderPaths) => void;
@@ -2126,6 +2165,11 @@ function ProjectRail({
     cancelScheduledClose();
     setHoveredKey(key);
     setHoveredEl(el);
+  }, [cancelScheduledClose]);
+  const closeTooltip = useCallback(() => {
+    cancelScheduledClose();
+    setHoveredKey(null);
+    setHoveredEl(null);
   }, [cancelScheduledClose]);
   const scheduleTooltipClose = useCallback(() => {
     cancelScheduledClose();
@@ -2226,10 +2270,13 @@ function ProjectRail({
                 <ProjectRailTooltip
                   project={project}
                   allSessions={allSessions}
+                  selectedSessionId={selectedSessionId}
                   runningSessionIds={runningSessionIds}
                   detailById={detailById}
                   unreadSessionIds={unreadSessionIds}
                   anchorEl={hoveredEl}
+                  onSelectSession={onSelectSession}
+                  onClose={closeTooltip}
                   onDeleteProject={onDeleteProject}
                   displayName={name}
                   onRenameProject={onRenameProject}
@@ -2289,10 +2336,13 @@ function ProjectRail({
 function ProjectRailTooltip({
   project,
   allSessions,
+  selectedSessionId,
   runningSessionIds,
   detailById,
   unreadSessionIds,
   anchorEl,
+  onSelectSession,
+  onClose,
   onDeleteProject,
   displayName,
   onRenameProject,
@@ -2301,10 +2351,15 @@ function ProjectRailTooltip({
 }: {
   project: ProjectSelection;
   allSessions: readonly SessionInfo[];
+  selectedSessionId: string | null;
   runningSessionIds: ReadonlySet<string>;
   detailById: Map<string, RunningRpcSessionDetail>;
   unreadSessionIds: ReadonlySet<string>;
   anchorEl: HTMLElement | null | undefined;
+  /** Opens the clicked session (same as clicking its row in the tree). */
+  onSelectSession: (s: SessionInfo) => void;
+  /** Closes the tooltip immediately (after a card click). */
+  onClose: () => void;
   onDeleteProject?: (project: ProjectSelection) => Promise<ProjectDeleteOutcome>;
   /** Alias-aware project name (matches the rail tile's monogram). */
   displayName: string;
@@ -2495,7 +2550,24 @@ function ProjectRailTooltip({
               const modelText = detail?.model ? `${detail.model.provider}/${detail.model.id}` : t("sidebar.modelUnknown");
               const sessionTitle = sessionDisplayName(session);
               return (
-              <li key={session.id} className="project-rail-tooltip-card">
+              <li
+                key={session.id}
+                className={`project-rail-tooltip-card is-clickable${session.id === selectedSessionId ? " is-selected" : ""}`}
+                role="button"
+                tabIndex={0}
+                title={sessionTitle}
+                onClick={() => {
+                  onSelectSession(session);
+                  onClose();
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectSession(session);
+                    onClose();
+                  }
+                }}
+              >
                 <span className={`project-rail-tooltip-dot${detail?.streaming ? " is-streaming" : detail?.compacting ? " is-compacting" : detail?.bashRunning ? " is-bash" : ""}`} aria-hidden="true" />
                 <span className="project-rail-tooltip-card-body">
                   <span className="project-rail-tooltip-card-title" title={sessionTitle}>{sessionTitle}</span>
@@ -2522,7 +2594,24 @@ function ProjectRailTooltip({
             {unread.map((session) => {
               const sessionTitle = sessionDisplayName(session);
               return (
-              <li key={session.id} className="project-rail-tooltip-card">
+              <li
+                key={session.id}
+                className={`project-rail-tooltip-card is-clickable${session.id === selectedSessionId ? " is-selected" : ""}`}
+                role="button"
+                tabIndex={0}
+                title={sessionTitle}
+                onClick={() => {
+                  onSelectSession(session);
+                  onClose();
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectSession(session);
+                    onClose();
+                  }
+                }}
+              >
                 <span className="project-rail-tooltip-dot is-done" aria-hidden="true" />
                 <span className="project-rail-tooltip-card-body">
                   <span className="project-rail-tooltip-card-title" title={sessionTitle}>{sessionTitle}</span>
@@ -3058,6 +3147,7 @@ function SessionItem({
         overflow: "hidden",
       }}
       data-selected={isSelected || undefined}
+      data-session-id={session.id}
       data-confirming={confirmDelete || undefined}
     >
       {confirmDelete ? (

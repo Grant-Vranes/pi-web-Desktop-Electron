@@ -2294,6 +2294,28 @@ span.token.table {
   background: color-mix(in srgb, var(--bg-panel) 60%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
+.project-rail-tooltip-card.is-clickable {
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.project-rail-tooltip-card.is-clickable:hover,
+.project-rail-tooltip-card.is-clickable:focus-visible {
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+  border-color: var(--border);
+  outline: none;
+}
+.project-rail-tooltip-card.is-selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.project-rail-tooltip-card.is-selected:hover,
+.project-rail-tooltip-card.is-selected:focus-visible {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.project-rail-tooltip-card.is-selected .project-rail-tooltip-card-title {
+  color: var(--accent);
+  font-weight: 600;
+}
 .project-rail-tooltip-dot {
   margin-top: 6px;
   width: 7px;
