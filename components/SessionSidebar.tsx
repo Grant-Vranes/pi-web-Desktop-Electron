@@ -1408,6 +1408,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject?.root ?? selectedCwd ?? ""}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--text-dim)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = selectedCwd ? "var(--border)" : "rgba(37,99,235,0.4)";
+            }}
             style={{
               width: "100%",
               display: "flex",

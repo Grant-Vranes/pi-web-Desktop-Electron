@@ -217,9 +217,11 @@ export function WorktreeSwitcher({ worktreeState, currentWorktreePath, homeDir, 
         aria-expanded={dropdownOpen}
         onMouseEnter={(e) => {
           if (compact) e.currentTarget.style.background = "var(--bg-hover)";
+          else e.currentTarget.style.borderColor = "var(--text-dim)";
         }}
         onMouseLeave={(e) => {
           if (compact) e.currentTarget.style.background = dropdownOpen ? "var(--bg-selected)" : "none";
+          else e.currentTarget.style.borderColor = "var(--border)";
         }}
         style={{
           display: "flex",
@@ -229,8 +231,10 @@ export function WorktreeSwitcher({ worktreeState, currentWorktreePath, homeDir, 
           padding: compact ? "0 10px" : "0 10px",
           // Compact mode is a ghost trigger that matches the chat-bar model
           // selector: no bordered box, just a subtle hover/open background.
-          background: dropdownOpen ? "var(--bg-selected)" : "none",
-          border: "none",
+          // Sidebar mode matches the project (CWD) picker above it: a bordered
+          // box with a subtle background so it reads as a switcher button.
+          background: compact ? (dropdownOpen ? "var(--bg-selected)" : "none") : "var(--bg-hover)",
+          border: compact ? "none" : "1px solid var(--border)",
           borderRadius: compact ? 9 : 7,
           cursor: "pointer",
           fontSize: 12,
@@ -242,6 +246,7 @@ export function WorktreeSwitcher({ worktreeState, currentWorktreePath, homeDir, 
           width: compact ? undefined : "100%",
           maxWidth: compact ? undefined : "100%",
           boxSizing: "border-box",
+          transition: compact ? undefined : "border-color 0.15s, background 0.15s",
         }}
       >
         {branchIcon}
