@@ -1349,7 +1349,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     onChangesCountChange?.(gitFiles.length);
   }, [gitFiles, onChangesCountChange]);
 
-  const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
+  const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null
+    || (mutationError !== null && !pendingMutation) || error !== null;
 
   const addUploadedFilesToChat = useCallback(() => {
     if (!uploadSummary || uploadSummary.uploaded.length === 0) return;
@@ -1446,6 +1447,18 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, zIndex: 5, background: "var(--bg-panel)" }}>
+        {error && (
+          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "2px 0", fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+            <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{error}</span>
+            <DismissButton onClick={() => setError(null)} title={t("files.dismissError")} />
+          </div>
+        )}
+        {mutationError && !pendingMutation && (
+          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "2px 0", fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+            <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{mutationError}</span>
+            <DismissButton onClick={() => setMutationError(null)} title={t("files.dismissOperationError")} />
+          </div>
+        )}
         {uploadBusy && (
           <div role="status" aria-live="polite" aria-label={uploadPhase === "checking" ? t("files.checking") : t("files.uploading", { progress: uploadProgress })}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 14, color: "var(--text-muted)" }}>
@@ -1662,9 +1675,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         >
           {loading ? (
             <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>Loading files...</div>
-          ) : error ? (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
-          ) : (
+          ) : error ? null : (
             roots.map((node) => (
               <TreeNode
                 key={node.fullPath}
@@ -1694,12 +1705,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               {t("files.noFiles")}
             </div>
           )}
-        </div>
-      )}
-      {mutationError && !pendingMutation && (
-        <div role="alert" style={{ padding: "6px 8px", color: "#f87171", fontSize: 11 }}>
-          {mutationError}
-          <DismissButton onClick={() => setMutationError(null)} title={t("files.dismissOperationError")} />
         </div>
       )}
       {contextMenu && (() => {

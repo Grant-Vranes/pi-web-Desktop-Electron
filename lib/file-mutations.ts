@@ -264,7 +264,27 @@ function executeMutation(
   const conflict = "conflict" in mutation ? mutation.conflict : "error";
   let removedExisting = false;
 
-  if (mutation.type !== "rename" && conflict === "overwrite" && samePath(destinationPath, mutation.sourcePath)) {
+  // A case-only rename (foo.txt -> FOO.txt) on a case-insensitive filesystem
+  // probes the source itself as the destination: lstat resolves the new name
+  // back to the source's inode, which would otherwise be misreported as an
+  // existing destination. Verify the probe hits the same inode and let the
+  // rename proceed. On case-sensitive filesystems, distinct-case names are
+  // genuinely different entries and still conflict when one really exists.
+  let caseOnlySelfRename = false;
+  if (mutation.type === "rename" && !samePath(destinationPath, mutation.sourcePath)) {
+    try {
+      const sourceStat = fs.statSync(mutation.sourcePath);
+      const destinationStat = fs.statSync(destinationPath);
+      caseOnlySelfRename = sourceStat.dev === destinationStat.dev
+        && sourceStat.ino === destinationStat.ino;
+    } catch {
+      // Destination probe failed — treat as a normal vacant destination.
+    }
+  }
+
+  if (caseOnlySelfRename) {
+    // Fall through to the rename below; the destination is the source.
+  } else if (mutation.type !== "rename" && conflict === "overwrite" && samePath(destinationPath, mutation.sourcePath)) {
     // Overwriting an entry with itself is a no-op — the source must survive.
     return { sourcePath: mutation.sourcePath, destinationPath, deleted: false };
   }
@@ -322,11 +342,11 @@ function executeMutation(
         resolveKeepBothName(destinationDirectory, name),
       );
     }
-  } else {
+  } else if (!caseOnlySelfRename) {
     assertVacant(destinationPath, allowedRoots);
   }
 
-  if (fs.lstatSync(mutation.sourcePath).isDirectory()) {
+  if (!caseOnlySelfRename && fs.lstatSync(mutation.sourcePath).isDirectory()) {
     const canonicalSourcePath = fs.realpathSync(mutation.sourcePath);
     const canonicalDestinationDirectory = fs.realpathSync(destinationDirectory);
     const canonicalDestinationPath = resolverFor(
