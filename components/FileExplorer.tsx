@@ -16,6 +16,7 @@ import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
 import { useI18n } from "@/hooks/useI18n";
 import { collectDroppedUploadEntries, type DroppedUploadEntry } from "@/lib/drop-collect";
 import { openInFileBrowser } from "@/lib/file-browser";
+import { canOpenInHorseMD, openInHorseMD } from "@/lib/horsemd";
 import type { FileTabMutation } from "./file-tab-state";
 type Translate = ReturnType<typeof useI18n>["t"];
 
@@ -675,6 +676,42 @@ function TreeNode({
               >
                 <MentionIcon />
                 {t("files.mention")}
+              </button>
+            )}
+            {canOpenInHorseMD(node.name, node.isDir) && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openInHorseMD(node.fullPath).then((result) => {
+                    if (!result.ok) {
+                      window.alert(`${t("files.openInHorseMDFailed")}: ${result.error ?? ""}`);
+                    }
+                  });
+                }}
+                title={t("files.openInHorseMD")}
+                aria-label={t("files.openInHorseMD")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  width: 20,
+                  height: 20,
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="2" y="5" width="20" height="14" rx="2" />
+                  <path d="M7 15V9l3 3 3-3v6" />
+                  <path d="M17.5 9v6M15 12.5h5" />
+                </svg>
               </button>
             )}
             <button
