@@ -2262,13 +2262,46 @@ span.token.table {
 .project-rail-tooltip-rename-input:focus {
   border-color: color-mix(in srgb, var(--text) 60%, transparent);
 }
+.project-rail-tooltip-path-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
 .project-rail-tooltip-path {
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.project-rail-tooltip-copy-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 90ms ease, color 90ms ease;
+}
+.project-rail-tooltip-copy-btn:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+.project-rail-tooltip-copy-btn.is-copied {
+  color: var(--accent);
+}
+.project-rail-tooltip-copy-btn:focus-visible {
+  outline: 1px solid var(--accent);
 }
 .project-rail-tooltip-section { display: flex; flex-direction: column; gap: 4px; }
 .project-rail-tooltip-label {

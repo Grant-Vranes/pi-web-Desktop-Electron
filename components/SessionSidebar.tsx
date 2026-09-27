@@ -14,6 +14,7 @@ import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { collectDroppedFolders, isFileDrag, type DroppedFolderPaths } from "@/lib/dropped-folders";
 import { displayCwd } from "@/lib/cwd-display";
 import { openInFileBrowser } from "@/lib/file-browser";
+import { copyText } from "@/lib/clipboard";
 import type { WorktreeEntry, WorktreeState } from "@/lib/worktree-types";
 import type { RunningRpcSessionDetail } from "@/lib/rpc-manager";
 import { calendarDaysAgo, formatSessionTimestamp, formatDayLabel } from "@/lib/i18n/format";
@@ -2437,6 +2438,19 @@ function ProjectRailTooltip({
     el?.select();
   }, []);
   const busyCount = running.length;
+
+  // Copy-to-clipboard feedback for the project path in the card head. `copied`
+  // flips the copy button icon to a checkmark for a short window.
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); }, []);
+  const handleCopyPath = useCallback(() => {
+    void copyText(project.root).then(() => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      setCopied(true);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1400);
+    });
+  }, [project.root]);
   const projectSessionsCount = useMemo(() => {
     let count = 0;
     for (const session of allSessions) {
@@ -2544,7 +2558,25 @@ function ProjectRailTooltip({
             </>
           )}
         </div>
-        <span className="project-rail-tooltip-path">{displayCwd(project.root)}</span>
+        <div className="project-rail-tooltip-path-row">
+          <span className="project-rail-tooltip-path">{displayCwd(project.root)}</span>
+          <button
+            type="button"
+            className={`project-rail-tooltip-copy-btn${copied ? " is-copied" : ""}`}
+            title={t("sidebar.copyProjectPath")}
+            aria-label={t("sidebar.copyProjectPath")}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleCopyPath();
+            }}
+          >
+            {copied ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            )}
+          </button>
+        </div>
       </div>
       {running.length > 0 ? (
         <div className="project-rail-tooltip-section">
