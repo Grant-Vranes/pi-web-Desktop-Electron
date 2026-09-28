@@ -157,6 +157,23 @@ test("first user messages expose both branch actions and edit before their own e
   assert.match(navigateSource, /await loadSession\(sid\)/);
 });
 
+test("branch selection always swaps the visible conversation, deferring navigate_tree only while bash runs", () => {
+  const leafSource = source.slice(
+    source.indexOf("  const handleLeafChange = useCallback"),
+    source.indexOf("  const handleModelChange = useCallback"),
+  );
+  // The read-only display swap happens immediately, before the bash guard, so
+  // clicking a branch always shows the selected conversation right away.
+  assert.match(leafSource, /setActiveLeafId\(leafId\);\s*const sid = sessionIdRef\.current;/);
+  assert.match(leafSource, /await loadContext\(sid, leafId\);/);
+  // navigate_tree mutates the agent's active branch; it is gated on bash not
+  // running so it never races a command, but never blocks the display swap.
+  assert.match(
+    leafSource,
+    /if \(leafId && !bashRunningRef\.current\) \{\s*sendAgentCommand\(sid, \{ type: "navigate_tree", targetId: leafId \}\)\.catch\(\(\) => \{\}\);/,
+  );
+});
+
 test("an empty persisted session displays the model it will use on first send", () => {
   assert.match(
     source,

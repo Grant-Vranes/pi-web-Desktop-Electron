@@ -1592,12 +1592,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [loadSession]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
-    if (bashRunningRef.current) return;
     setActiveLeafId(leafId);
     const sid = sessionIdRef.current;
     if (!sid) return;
+    // Switch the visible conversation immediately even while a bash command is
+    // running (loadContext is a read-only view change). Defer only the
+    // server-side navigate_tree, which mutates the agent's active branch and
+    // should not race a running command.
     await loadContext(sid, leafId);
-    if (leafId) {
+    if (leafId && !bashRunningRef.current) {
       sendAgentCommand(sid, { type: "navigate_tree", targetId: leafId }).catch(() => {});
     }
   }, [loadContext]);
