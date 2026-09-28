@@ -1551,7 +1551,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, []);
 
-  const handleFork = useCallback(async (entryId: string) => {
+  const handleFork = useCallback(async (entryId: string, position?: "at" | "before") => {
     if (bashRunningRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
@@ -1560,6 +1560,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const result = await sendAgentCommand<{ cancelled?: boolean; newSessionId?: string }>(sid, {
         type: "fork",
         entryId,
+        ...(position ? { position } : {}),
       });
       const { cancelled, newSessionId } = result ?? {};
       if (!cancelled && newSessionId) {

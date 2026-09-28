@@ -518,6 +518,57 @@ export class AgentSessionWrapper {
     this.onDestroyCallback = cb;
   }
 
+  /**
+   * 从这切入新会话（position "at"）后，把拷贝出的新会话条目统一平移到当前时间：
+   * 最后一条消息变成“现在”，其余条目按相同的恒定偏移平移，保持彼此之间的相对
+   * 时间间隔。这样新会话在会话列表中会被当作最新，同时对话内部的时间关系不变。
+   * 同时更新条目的 entry.timestamp 与内层 message.timestamp，确保列表排序
+   * （modified）和聊天窗口内显示的时间都指向“现在”。
+   */
+  private reTimestampEntriesForFork(forkedManager: SessionManager): void {
+    const entries = forkedManager.getEntries();
+    const readTimestamp = (value: unknown): number | undefined => {
+      if (typeof value === "string") {
+        const ts = Date.parse(value);
+        return Number.isNaN(ts) ? undefined : ts;
+      }
+      if (typeof value === "number") return value;
+      return undefined;
+    };
+    // 每个条目的“有效时间”以 message.timestamp 为准（列表排序 modified 与聊天内
+    // 显示都优先用它），没有 message 时再回退到 entry.timestamp。
+    const effectiveTimestamp = (entry: (typeof entries)[number]): number | undefined => {
+      const message = (entry as { message?: { timestamp?: unknown } | null }).message;
+      const messageTs = readTimestamp(message?.timestamp);
+      if (messageTs !== undefined) return messageTs;
+      return readTimestamp(entry.timestamp);
+    };
+    let maxTs = -Infinity;
+    for (const entry of entries) {
+      const ts = effectiveTimestamp(entry);
+      if (ts !== undefined && ts > maxTs) maxTs = ts;
+    }
+    if (!Number.isFinite(maxTs)) return;
+    const offset = Date.now() - maxTs;
+    if (offset === 0) return;
+    for (const entry of entries) {
+      if (typeof entry.timestamp === "string") {
+        const ts = Date.parse(entry.timestamp);
+        if (!Number.isNaN(ts)) entry.timestamp = new Date(ts + offset).toISOString();
+      }
+      const message = (entry as { message?: { timestamp?: string | number } | null }).message;
+      if (message && message.timestamp !== undefined) {
+        const ts = readTimestamp(message.timestamp);
+        if (ts !== undefined) {
+          message.timestamp =
+            typeof message.timestamp === "number"
+              ? ts + offset
+              : new Date(ts + offset).toISOString();
+        }
+      }
+    }
+  }
+
   private async withSessionReplacement<T>(
     replacement: "fork" | "clone",
     operation: () => Promise<T>,
@@ -740,31 +791,52 @@ export class AgentSessionWrapper {
           const entry = sessionManager.getEntry(entryId);
           if (!entry) throw new Error("Invalid entry ID for forking");
 
+          // Decide how much history the forked session keeps.
+          // "从这切入新会话" on an assistant reply keeps the whole conversation up
+          // to and including that reply (its parent is the preceding user message,
+          // which would otherwise drop the answer). "New session" on a user message
+          // keeps that message as the first entry of the new session instead. An
+          // explicit `position: "at"` always includes the selected entry.
+          const position: "at" | "before" =
+            command.position === "at" ||
+            (entry.type === "message" && entry.message.role === "assistant")
+              ? "at"
+              : "before";
+          const targetLeafId = position === "at" ? entry.id : entry.parentId;
+
           const sessionDir = sessionManager.getSessionDir();
           let newSessionFile: string;
           let forkedManager: SessionManager;
 
-          if (!entry.parentId) {
+          if (!targetLeafId) {
             // Fork before the first message: create an empty session linked to this one
             forkedManager = SessionManager.create(sessionManager.getCwd(), sessionDir, {
               parentSession: currentSessionFile,
             });
             newSessionFile = forkedManager.getSessionFile() as string;
           } else {
-            // Fork after some history: copy path up to (but not including) the fork point
+            // Fork after some history: copy the path up to and including the fork point
             forkedManager = SessionManager.open(currentSessionFile, sessionDir);
-            const forkedPath = forkedManager.createBranchedSession(entry.parentId);
+            const forkedPath = forkedManager.createBranchedSession(targetLeafId);
             if (!forkedPath) throw new Error("Failed to create forked session");
             newSessionFile = forkedPath;
+
+            // 从这切入新会话：把新会话锚定到当前时间，使其在会话列表中显示为最新。
+            // 按恒定偏移平移所有条目，把最后一条消息设为“现在”，同时保留消息之间
+            // 原有的时间间隔。
+            if (position === "at") this.reTimestampEntriesForFork(forkedManager);
           }
 
-          if (!existsSync(newSessionFile)) {
+          // 无条件写盘（这是本次 fork 新创建的文件）：createBranchedSession 在包含
+          // assistant 消息时已生成文件，但“切入”后需要把重排过时间戳的内容覆盖回
+          // 写，因此这里不再用 existsSync 守卫，而是始终整体写回。
+          {
             const header = forkedManager.getHeader();
             if (!header) throw new Error("Forked session is missing a session header");
             const content = [header, ...forkedManager.getEntries()]
               .map((forkedEntry) => JSON.stringify(forkedEntry))
               .join("\n") + "\n";
-            writeFileSync(newSessionFile, content, { encoding: "utf8", flag: "wx" });
+            writeFileSync(newSessionFile, content, { encoding: "utf8" });
           }
 
           const newSessionId = forkedManager.getSessionId();

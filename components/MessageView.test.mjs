@@ -294,3 +294,32 @@ test("renders custom-message images as buttons that open a larger preview", () =
   assert.match(html, /<button[^>]+aria-label="Preview image"[^>]*>/);
   assert.match(html, /<img[^>]+src="data:image\/png;base64,YWJj"/);
 });
+
+test("renders a fork-here button on assistant messages with an entry id", () => {
+  let forked = null;
+  const html = renderMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "An answer" }],
+  }, {
+    entryId: "abc123",
+    onFork: (id) => (forked = id),
+  });
+
+  assert.match(html, /Fork new session from here/);
+  const match = html.match(/title="Fork a new session from here[^"]*"/);
+  assert.ok(match, "fork button title should be present");
+});
+
+test("omits the fork-here button on assistant messages without an entry id or handler", () => {
+  const withEntryOnly = renderMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "An answer" }],
+  }, { entryId: "abc123" });
+  const withHandlerOnly = renderMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "An answer" }],
+  }, { onFork: () => {} });
+
+  assert.doesNotMatch(withEntryOnly, /Fork new session from here/);
+  assert.doesNotMatch(withHandlerOnly, /Fork new session from here/);
+});

@@ -761,6 +761,8 @@ export const zhTWLocale: LocalePlugin = {
     "i18n.editFromHereTitle": "從此處編輯，並在這個工作階段中建立分支",
     "i18n.newSession": "新增工作階段",
     "i18n.newSessionTitle": "新增工作階段，從此處建立獨立副本",
+    "i18n.forkFromHere": "從此切入新工作階段",
+    "i18n.forkFromHereTitle": "從此切入新工作階段，保留現有對話與歷史，開啟新工作階段",
     "i18n.estimatedTokens": "串流輸出期間的估算 Token 數",
     "i18n.noOutput": "（無輸出）",
     "i18n.noSummary": "（無摘要）",

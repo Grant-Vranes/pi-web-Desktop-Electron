@@ -761,6 +761,8 @@ export const zhCNLocale: LocalePlugin = {
     "i18n.editFromHereTitle": "从此处编辑，此会话内创建对话分岔",
     "i18n.newSession": "新会话",
     "i18n.newSessionTitle": "新会话，从此处创建独立副本",
+    "i18n.forkFromHere": "从此切入新会话",
+    "i18n.forkFromHereTitle": "从此切入新会话，保持现有对话与历史，开启新会话",
     "i18n.estimatedTokens": "流式输出期间的估算 Token 数",
     "i18n.noOutput": "（无输出）",
     "i18n.noSummary": "（无摘要）",
