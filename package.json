@@ -41,6 +41,8 @@
     "start:lan": "node bin/pi-web.js --hostname 0.0.0.0 --no-open",
     "desktop:dev": "node bin/start-desktop-dev.js",
     "desktop:start": "cross-env PI_WEB_DESKTOP_DEV=0 electron desktop/main.cjs",
+    "desktop:tauri": "tauri dev",
+    "desktop:tauri:build": "tauri build",
     "clean:dist": "node bin/clean-dist.js",
     "desktop:dist": "npm run clean:dist && npm run build && electron-builder --publish never",
     "lint": "eslint .",
@@ -92,6 +94,7 @@
   "devDependencies": {
     "@lobehub/icons": "^5.6.0",
     "@tailwindcss/postcss": "^4.2.2",
+    "@tauri-apps/cli": "^2.12.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25",
     "@types/proper-lockfile": "4.1.4",

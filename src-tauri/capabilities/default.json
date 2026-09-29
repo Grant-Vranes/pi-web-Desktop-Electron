@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the main window (remote UI on 127.0.0.1)",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:30141/*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "dialog:default",
+    "opener:default",
+    "clipboard-manager:allow-write-text",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/pi-web-server",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}

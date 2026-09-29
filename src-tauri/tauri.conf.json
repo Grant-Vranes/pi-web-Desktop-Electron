@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pi Web",
+  "version": "0.9.3",
+  "identifier": "com.agegr.pi-web",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devUrl": "http://127.0.0.1:30141",
+    "frontendDist": "http://127.0.0.1:30141"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Pi Web",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 560,
+        "dragDropEnabled": false,
+        "url": "http://127.0.0.1:30141"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon-mac-512.png",
+      "icons/32x32.png",
+      "icons/128x128.png"
+    ],
+    "externalBin": ["binaries/pi-web-server"],
+    "resources": ["resources/pi-web"]
+  }
+}
