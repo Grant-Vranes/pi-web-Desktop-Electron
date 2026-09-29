@@ -34,6 +34,7 @@ import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { sendAgentCommand } from "@/lib/agent-client";
+import { openDesktopTerminal, installTauriSessionRowContextMenu } from "@/lib/desktop-bridge";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
@@ -153,6 +154,11 @@ export function AppShell() {
     if (Notification.permission !== "granted") return;
     void setupPushSubscription(locale);
   }, [locale]);
+  // Tauri shell bootstrap: install the session-row context-menu listener
+  // (parity with desktop/preload.cjs). No-op under Electron/browser.
+  useEffect(() => {
+    installTauriSessionRowContextMenu();
+  }, []);
   // Audio ownership lives here (not in ChatWindow) so the completion tone can
   // also fire for tasks finishing in a non-active workspace whose ChatWindow
   // is not mounted. ChatWindow receives the audio callbacks as props.
@@ -1213,28 +1219,12 @@ export function AppShell() {
     const branch = selectedSession?.branch ?? null;
     setTerminalOpening(true);
     try {
-      // Prefer the Electron main-process path: it runs in the full graphical
-      // session, so terminal emulators launched there actually appear. The
-      // embedded Next.js server's process context often cannot open windows
-      // on Wayland GNOME, so the HTTP API is only a fallback for browser
-      // access.
-      const desktop = (typeof window !== "undefined" ? (window as unknown as { piDesktop?: { openTerminal?: (payload: { cwd: string; branch?: string | null }) => Promise<{ ok: boolean; error?: string }> } }).piDesktop : undefined);
-      let result: { ok: boolean; error?: string } | null = null;
-      if (desktop?.openTerminal) {
-        result = await desktop.openTerminal({ cwd, branch });
-      } else {
-        const response = await fetch("/api/terminal/open", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cwd, branch }),
-        });
-        if (response.ok) {
-          result = { ok: true };
-        } else {
-          const data = await response.json().catch(() => ({})) as { error?: string };
-          result = { ok: false, error: data.error ?? `HTTP ${response.status}` };
-        }
-      }
+      // Prefer the shell-native path (Electron main process / Tauri command):
+      // they run in the full graphical session, so terminal emulators launched
+      // there actually appear. The embedded Next.js server's process context
+      // often cannot open windows on Wayland GNOME, so the HTTP API is only a
+      // fallback for browser access.
+      const result = await openDesktopTerminal({ cwd, branch });
       if (!result?.ok) {
         // Spawn failed (no terminal emulator / permission error). Copy the
         // intended command so the user can paste it into a terminal they open
