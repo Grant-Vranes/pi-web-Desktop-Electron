@@ -16,14 +16,14 @@
 
 ## 本分支的增强
 
-### 🖥 桌面端（Electron）
+### 🖥 桌面端（Tauri + Electron 双壳）
 
-仓库在 `desktop/` 下提供完整的 Electron 封装，把 Pi Web 变成一个原生桌面应用：
+仓库同时提供两套桌面壳：Tauri 版（`src-tauri/`，推荐）与 Electron 版（`desktop/`），架构一致——**Node 服务器进程 + 本地 HTTP UI，壳只负责窗口与系统集成**。前端通过 `lib/desktop-bridge.ts` 运行时检测自动适配。
 
 - **一键启动**：桌面端自动拉起内嵌的 `pi-web` 服务器；若同端口已有运行中的服务器则直接复用，多窗口 / CLI 与桌面端可共存。
-- **运行状态指示**：系统托盘图标实时显示会话运行状态（动画指示），macOS Dock 图标右上角会显示“呼吸点”运行指示。
+- **运行状态指示**：系统托盘图标实时显示会话运行状态，Electron 版另支持 macOS Dock 呼吸点指示。
 - **原生集成**：会话行右键弹出原生菜单（打开终端、删除会话等），删除前有原生确认对话框。
-- **打包分发**：通过 `electron-builder` 打包 macOS（dmg）、Windows（nsis）、Linux（AppImage）安装包，并附带 GitHub Actions 构建工作流（`.github/workflows/build-desktop.yml`）。
+- **打包分发**：Tauri 通过 `cargo tauri build` 打包（官方 Node 二进制作 sidecar，体积显著小于 Electron）；Electron 通过 `electron-builder` 打包 macOS（dmg）、Windows（nsis）、Linux（AppImage）。Tauri 版细节见 [src-tauri/README.md](./src-tauri/README.md)。
 
 ### 🌐 代理（Proxy）支持
 
@@ -37,6 +37,7 @@
 ### 🎨 界面与体验
 
 - **多主题**：在亮色 / 暗色之外新增 Mist、Rose、Pine 等阅读友好主题，可从工具栏主题选择器切换，也支持跟随系统。
+- **双桌面壳（Tauri + Electron）**：Tauri 版以官方 Node 二进制为 sidecar、Tauri 只做壳，体积显著小于 Electron 同等打包；详见 [src-tauri/README.md](./src-tauri/README.md)。
 - **文件查看 / 编辑**：编辑模式改用 CodeMirror 6，带语法高亮、查找替换和编辑器行内的变更指示；大文本文件分页预览。
 - **Excalidraw 支持**：直接在 Pi Web 中查看和编辑 `.excalidraw` 白板文件（查看 / 编辑双模式）。
 - **文件管理增强**：文件浏览器支持新建 / 重命名 / 删除、剪贴板复制粘贴、拖拽上传，以及从系统文件浏览器打开文件。
@@ -62,13 +63,41 @@ Pi Web 需要 Node.js 22.19.0 或更新版本。
 npx @agegr/pi-web@latest
 ```
 
-**桌面端**（Electron）：
+**桌面端**（Tauri，推荐）：
 
 ```bash
 git clone https://github.com/Grant-Vranes/pi-web.git
 cd pi-web
 npm install
+```
 
+**Tauri 开发模式**（两个终端）：
+
+```bash
+# 终端 1：Next dev server（Tauri 窗口指向 http://127.0.0.1:30141）
+npm run dev
+
+# 终端 2：Tauri 壳（dev 模式下 Rust 直接 spawn node bin/pi-web.js）
+npm run desktop:tauri
+```
+
+> 前置：Rust 工具链（`rustup` 安装）+ `@tauri-apps/cli`（已加入 devDependencies，`npm install` 即可）。
+
+**Tauri 打包安装器**：
+
+```bash
+# 1. 构建前端 + 组装 payload + 下载官方 Node sidecar 二进制
+node scripts/build-sidecar.mjs
+
+# 2. Tauri 打包（产物在 src-tauri/target/release/bundle/ 下）
+npm run desktop:tauri:build
+```
+
+> 打包要求 `src-tauri/resources/pi-web` 与 `src-tauri/binaries/pi-web-server-*` 存在（`build-sidecar.mjs` 会生成）。`node-pty` 原生模块不可交叉编译，多平台发布需在对应平台分别执行。
+
+**Electron 桌面端**（双壳并存，前端通过 `lib/desktop-bridge.ts` 运行时自动检测）：
+
+```bash
 # 开发模式（Web dev server + Electron）
 npm run desktop:dev
 
@@ -140,6 +169,7 @@ components/      React UI 组件
 hooks/           客户端状态与交互 hooks
 lib/             会话、智能体、模型、文件、Git、代理与安全逻辑
 desktop/         Electron 桌面端封装（托盘 / Dock 指示、原生菜单）
+src-tauri/       Tauri 桌面壳（sidecar Node 服务器 + 托盘 + 原生菜单）
 bin/             npm CLI 入口与启动参数解析
 public/          静态资源与 PWA 文件
 docs/            用户与贡献者文档

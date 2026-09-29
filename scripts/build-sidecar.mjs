@@ -51,7 +51,7 @@ function targetTriple() {
 async function downloadNode(triple) {
   const p = platform();
   const ext = p === "win32" ? "zip" : "tar.gz";
-  const url = `https://nodejs.org/dist/v${nodeVersion}/node-${nodeVersion}-${p}-${arch()}.${ext}`;
+  const url = `https://nodejs.org/dist/${nodeVersion}/node-${nodeVersion}-${p}-${arch()}.${ext}`;
   const outBin = path.join(binariesDir, `pi-web-server-${triple}${p === "win32" ? ".exe" : ""}`);
   console.log(`[build-sidecar] downloading ${url}`);
   const response = await fetch(url);
