@@ -354,6 +354,15 @@ export async function DELETE(
       if (deletedId === id) continue;
       try { await abortSubagent(deletedId); } catch { /* idle or completed */ }
       await getRpcSession(deletedId)?.shutdown();
+    }
+    try { await abortSubagent(id); } catch { /* ordinary session */ }
+    await getRpcSession(id)?.shutdown();
+    for (const [deletedId, deletedPath] of deletedPaths) {
+      try {
+        unlinkSync(deletedPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
       invalidateSessionPathCache(deletedId);
       invalidateSessionManagerCache(deletedPath);
     }

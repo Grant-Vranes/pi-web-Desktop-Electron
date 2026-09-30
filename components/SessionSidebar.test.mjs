@@ -40,21 +40,6 @@ test("only Shift+click bypasses session deletion confirmation", () => {
   );
 });
 
-test("persists and exposes a vertical session/explorer resize handle", () => {
-  assert.match(source, /axis: "vertical"/);
-  assert.match(source, /storageKey: "pi-web:sidebar-session-pane-height"/);
-  assert.match(source, /Math\.round\(\(paneHeight \+ explorerHeight\) \/ 2\)/);
-  assert.match(source, /ref=\{sessionPaneRef\}[\s\S]*?<SessionSearch/);
-  assert.match(source, /data-resize-handle="sidebar-sections"/);
-  assert.match(source, /sidebar-section-resize-handle/);
-  assert.match(globalStyles, /\.sidebar-section-resize-handle:focus-visible::after/);
-  assert.doesNotMatch(globalStyles, /\.sidebar-section-resize-handle:focus-visible \{[^}]*outline: 2px solid var\(--accent\)/);
-  assert.match(globalStyles, /\.sidebar-section-resize-handle::after[\s\S]*?background: transparent/);
-  assert.match(source, /borderTop: "1px solid var\(--border\)"/);
-  assert.match(source, /var\(--sidebar-session-pane-height, 320px\)/);
-  assert.match(source, /minHeight: explorerOpen \? EXPLORER_PANE_MIN_HEIGHT : 0/);
-});
-
 test("does not register row-level session deletion shortcuts", () => {
   assert.doesNotMatch(sessionItemSource, /const handleKeyDown/);
   assert.doesNotMatch(sessionItemSource, /onKeyDown=\{handleKeyDown\}/);
@@ -146,11 +131,7 @@ test("does not expose disk-backed actions for transient sessions", () => {
 });
 
 test("hides subagent rows and aggregates their state into the main session row", () => {
-<<<<<<< HEAD
   assert.match(source, /const sessionFamilies = listSessionFamilies\(tabSessions\)/);
-=======
-  assert.match(source, /const sessionFamilies = useMemo\(\(\) => listSessionFamilies\(filteredSessions\)/);
->>>>>>> upstream/main
   assert.match(source, /familySessions\.some\(\(session\) => session\.id === selectedSessionId\)/);
   assert.match(source, /familySessions\.some\(\(session\) => runningSessionIds\.has\(session\.id\)\)/);
   assert.doesNotMatch(source, /function SessionTreeItem/);

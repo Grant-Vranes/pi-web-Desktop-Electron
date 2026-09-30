@@ -97,6 +97,9 @@ test("New restores the draft after session navigation and workspace auto-restore
         bashRecoveryIdRef: { current: 0 },
         cancelEventStreamGrace() {},
         closeEvents() {},
+        // Module-level project file-tab helpers used by handleCwdChange.
+        saveProjectFileTabs() {},
+        loadProjectFileTabs: () => null,
         isMobile: false,
         activeCwd: cwd,
         activeFileTabId: null,

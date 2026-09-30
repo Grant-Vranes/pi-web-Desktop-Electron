@@ -25,7 +25,7 @@ test("custom cwd selection remembers the last validated path for the picker", ()
 
 test("default cwd is selected through the same validation as a custom path", () => {
   const defaultStart = source.indexOf("const handleDefaultCwd = useCallback");
-  const defaultEnd = source.indexOf("const handleCreateWorktree", defaultStart);
+  const defaultEnd = source.indexOf("const handleWorktreeSwitch", defaultStart);
   const defaultSource = source.slice(defaultStart, defaultEnd);
   assert.notEqual(defaultStart, -1);
   assert.match(defaultSource, /commitCustomPath\(data\.cwd, \{ remember: false \}\)/);

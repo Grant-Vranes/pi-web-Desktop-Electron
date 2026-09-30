@@ -25,7 +25,7 @@ test("renders view-only canvas in view mode", () => {
 test("strips saved viewport state and scrolls the canvas back to content", () => {
   assert.match(source, /appState: stripViewportState\(scene\.appState\)/);
   assert.match(source, /excalidrawAPI=\{handleExcalidrawApi\}/);
-  assert.match(source, /api\.scrollToContent\(\s*undefined,\s*\{ fitToViewport: true/);
+  assert.match(source, /Api\.scrollToContent\(\s*undefined,\s*\{ fitToViewport: true/);
   assert.match(source, /requestAnimationFrame\(\(\) => \{[\s\S]*?scrollToContent/s);
 });
 

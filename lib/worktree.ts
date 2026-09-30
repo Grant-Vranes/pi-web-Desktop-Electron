@@ -318,7 +318,9 @@ export async function addWorktree(cwd: string, branch: string): Promise<{ path: 
 
 export async function removeWorktree(cwd: string, worktreePath: string, force = false): Promise<void> {
   const worktrees = await listWorktrees(cwd);
-  const target = findWorktreeByPath(worktrees, worktreePath);
+  // git prints resolved paths (/private/var/... on macOS) while callers pass
+  // the symlinked form (/var/...); compare against the resolved candidate.
+  const target = findWorktreeByPath(worktrees, realPathOrSelf(worktreePath));
   if (!target) throw new Error(`Not a worktree of this repository: ${worktreePath}`);
   if (target.isMain) throw new Error("Cannot remove the main worktree");
 

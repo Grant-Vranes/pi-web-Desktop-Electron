@@ -11,7 +11,7 @@ test("fetches worktree state for active cwd and passes branch/switcher data to C
   // interactive WorktreeSwitcher that matches the sidebar.
   assert.match(source, /setWorktreeState\(/);
   assert.match(source, /currentBranch=\{currentBranch\}/);
-  assert.match(source, /worktreeState=\{showWorktreeSwitcher \? worktreeState : null\}/);
+  assert.match(source, /worktreeState=\{showWorktreeSwitcher && !worktreeSwitcherLocked \? worktreeState : null\}/);
   assert.match(source, /onCwdChange=\{handleWorktreeSwitch\}/);
 });
 

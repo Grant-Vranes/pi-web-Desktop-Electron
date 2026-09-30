@@ -128,15 +128,6 @@ function toResourceInfo(resource: ResolvedResource, kind: PluginResourceKind): P
   };
 }
 
-function toResourceInfo(resource: ResolvedResource, kind: PluginResourceKind): PluginResourceInfo {
-  return {
-    kind,
-    name: getResourceName(resource.path, kind),
-    path: resource.path,
-    relativePath: getRelativePath(resource),
-  };
-}
-
 function getConfiguredVersion(source: string): string | undefined {
   const npmSpec = source.startsWith("npm:") ? source.slice(4) : undefined;
   if (npmSpec) {
