@@ -1,23 +1,26 @@
 import { NextResponse } from "next/server";
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   attachSessionProjectInfo,
   listAllSessions,
   mergeSessionLists,
+  openSessionManager,
   resolveSessionPath,
   resolveSessionIdByPath,
   invalidateSessionPathCache,
   invalidateSessionListCache,
+  invalidateSessionManagerCache,
   buildSessionContext,
   readSessionHeader,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
 import { abortSubagent, getRpcSession, getRpcSessionInfos } from "@/lib/rpc-manager";
-import { projectTreeForResponse } from "@/lib/project-tree";
+import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { computeSessionStats } from "@/lib/session-stats";
+import { startServerPerf } from "@/lib/perf";
+import { computeSessionRevision } from "@/lib/session-revision";
 import { archiveSession, forgetArchivedSession, unarchiveSession } from "@/lib/archived-sessions";
 import type { SessionEntry } from "@/lib/types";
 import { readSubagentRun, readSubagentSessionResources, SUBAGENT_META_TYPE } from "@/lib/subagents";
@@ -29,20 +32,40 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const perf = startServerPerf("GET /api/sessions/[id]");
   try {
+    perf?.span("resolve");
     const rpc = getRpcSession(id);
-    const liveRpc = rpc?.isAlive() ? rpc : undefined;
+    const searchParams = new URL(req.url).searchParams;
+    const force = searchParams.get("force") === "1";
+
+    // A live wrapper only reflects the appends pi-web itself made. When another
+    // pi process (the TUI) writes the same session file, the in-memory index
+    // stays stale. Only probe on ?force=1 (session mount / page refresh): two
+    // processes writing one JSONL is unsupported, so post-turn reads must not
+    // scan disk. Eviction is idle-only; mid-run the wrapper owns the write path.
+    let liveWrapper = rpc?.isAlive() ? rpc : undefined;
+    let wrapperRebuilt = false;
+    if (force && liveWrapper?.evictIfDiskAhead()) {
+      wrapperRebuilt = true;
+      liveWrapper = undefined;
+    }
+    const liveRpc = liveWrapper;
     const resolvedPath = liveRpc ? null : await resolveSessionPath(id);
     if (!liveRpc && !resolvedPath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const sm = liveRpc?.inner.sessionManager ?? SessionManager.open(resolvedPath!);
+    const sm = liveRpc?.inner.sessionManager ?? openSessionManager(resolvedPath!);
+    perf?.span("open");
     const filePath = liveRpc?.sessionFile || sm.getSessionFile() || resolvedPath || "";
     const entries = sm.getEntries();
     const leafId = sm.getLeafId();
-    const tree = projectTreeForResponse(sm.getTree());
-    const searchParams = new URL(req.url).searchParams;
+    const summaryTree = searchParams.get("tree") === "summary";
+    const tree = summaryTree
+      ? toSummaryTree(projectTreeForResponse(sm.getTree()))
+      : projectTreeForResponse(sm.getTree());
+    perf?.span("tree");
     const deferThinking = searchParams.has("deferThinking");
     const deferToolResultImages = searchParams.has("deferMedia");
     const rawTail = Number(searchParams.get("tail"));
@@ -53,11 +76,24 @@ export async function GET(
       tail,
       sessionId: id, // local: lazy URLs for historical tool-result images
     });
+    perf?.span("context");
     const totalActiveMs = computeSessionTotalActiveMs(entries);
     // Cumulative usage over ALL entries, including history compacted away —
     // the same aggregation the SDK's getSessionStats() uses. Lets the client
     // keep monotonic token/cost counters across compaction and page reloads.
     const stats = computeSessionStats(entries as unknown as SessionEntry[]);
+    perf?.span("stats");
+    // Opaque freshness token for the session view cache. Derived from the
+    // disk fingerprint and the actual read source; null tells the client the
+    // snapshot is unstable and must not be cached as fresh.
+    const latestEntry = entries[entries.length - 1] as { id?: string } | undefined;
+    const snapshotRevision = computeSessionRevision({
+      filePath,
+      sourceId: liveRpc ? `runtime:${String(liveRpc.inner.sessionId)}` : "disk",
+      entryCount: entries.length,
+      latestEntryId: typeof latestEntry?.id === "string" ? latestEntry.id : null,
+      leafId: leafId ?? null,
+    });
     const sessionName = sm.getSessionName();
     const firstUserEntry = entries.find((entry) => entry.type === "message" && entry.message.role === "user");
     const firstUserMessage = firstUserEntry?.type === "message" ? firstUserEntry.message : undefined;
@@ -96,7 +132,7 @@ export async function GET(
       transient: !filePath || !existsSync(filePath),
     }]))[0] : null;
 
-    return jsonResponse(
+    return perf?.attach(jsonResponse(
       req,
       {
         sessionId: id,
@@ -104,10 +140,29 @@ export async function GET(
         info,
         leafId,
         tree,
+        ...(summaryTree ? { treeFormat: "summary" as const } : {}),
+        snapshotRevision,
         context,
         stats,
         totalActiveMs,
         ...(toolNames !== undefined ? { toolNames } : {}),
+        ...(wrapperRebuilt ? { wrapperRebuilt: true } : {}),
+      },
+    )) ?? jsonResponse(
+      req,
+      {
+        sessionId: id,
+        filePath,
+        info,
+        leafId,
+        tree,
+        ...(summaryTree ? { treeFormat: "summary" as const } : {}),
+        snapshotRevision,
+        context,
+        stats,
+        totalActiveMs,
+        ...(toolNames !== undefined ? { toolNames } : {}),
+        ...(wrapperRebuilt ? { wrapperRebuilt: true } : {}),
       },
     );
   } catch (error) {
@@ -136,12 +191,16 @@ export async function PATCH(
     if (typeof body.name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
+    const name = body.name;
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    const sm = SessionManager.open(filePath);
-    sm.appendSessionInfo(body.name.trim());
+
+    // PATCH writes via appendSessionInfo — open fresh, bypassing the cache.
+    const sm = openSessionManager(filePath, { mutable: true });
+    sm.appendSessionInfo(name.trim());
+    invalidateSessionManagerCache(filePath);
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -305,10 +364,18 @@ export async function DELETE(
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      invalidateSessionPathCache(deletedId);
     }
-    forgetArchivedSession(id);
-    invalidateSessionPathCache(id);
+    try { await abortSubagent(id); } catch { /* ordinary session */ }
+    await getRpcSession(id)?.shutdown();
+    for (const [deletedId, deletedPath] of deletedPaths) {
+      try {
+        unlinkSync(deletedPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      invalidateSessionPathCache(deletedId);
+      invalidateSessionManagerCache(deletedPath);
+    }
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });
   } catch (error) {

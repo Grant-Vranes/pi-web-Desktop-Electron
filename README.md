@@ -4,7 +4,11 @@
 
 本项目以 pi-web 为基础进行构建，并会**持续更新、集成 pi-web 上游的核心功能**：每当上游发布新能力，我们都会跟进合入，保证桌面端与上游体验一致。
 
-在上游基础上，本项目新增了 **Electron 桌面端**、**代理（Proxy）支持**，并对**整体 UI 与文件管理体验**做了大量改进。
+在上游基础上，本项目新增了 **Tauri / Electron 桌面端**、**代理（Proxy）支持**，并对**整体 UI 与文件管理体验**做了大量改进。
+
+**[Try the interactive demo →](https://agegr.github.io/pi-web/)** The real Pi Web UI runs entirely in your browser, with sample sessions, files and models. There is nothing to install; replies are pre-written and no model is called.
+
+![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 
 | 整体页面<br />![image-20260913185856375](./docs/screenshots/image-20260913185856375.png) | 代理配置<br />![image-20260913190131381](./docs/screenshots/image-20260913190131381.png) |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
@@ -173,6 +177,7 @@ src-tauri/       Tauri 桌面壳（sidecar Node 服务器 + 托盘 + 原生菜�
 bin/             npm CLI 入口与启动参数解析
 public/          静态资源与 PWA 文件
 docs/            用户与贡献者文档
+demo/            Static browser demo published to GitHub Pages (see demo/README.md)
 ```
 
 架构细节与文件地图见 [AGENTS.md](./AGENTS.md)；上游原版 README 见 [README_Original/README.md](./README_Original/README.md)。

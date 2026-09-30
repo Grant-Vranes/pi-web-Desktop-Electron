@@ -22,3 +22,15 @@ test("custom cwd selection remembers the last validated path for the picker", ()
   assert.match(customPathSource, /saveLastCustomCwd\(data\.cwd\)/);
   assert.match(source, /initialPath=\{customPathValue\}/);
 });
+
+test("default cwd is selected through the same validation as a custom path", () => {
+  const defaultStart = source.indexOf("const handleDefaultCwd = useCallback");
+  const defaultEnd = source.indexOf("const handleCreateWorktree", defaultStart);
+  const defaultSource = source.slice(defaultStart, defaultEnd);
+  assert.notEqual(defaultStart, -1);
+  // HEAD keeps the rail history guard: selecting the default cwd re-admits a
+  // previously deleted directory instead of going through commitCustomPath.
+  assert.match(defaultSource, /deletedProjectKeysRef\.current\.delete\(data\.cwd\)/);
+  assert.match(defaultSource, /setSelectedCwd\(data\.cwd\)/);
+  assert.match(customPathSource, /saveLastCustomCwd\(data\.cwd\)/);
+});

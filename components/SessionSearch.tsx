@@ -20,6 +20,8 @@ export function SessionSearch({ open, query, refreshKey, children, selectedSessi
   const response = state.query === search ? state.response : undefined;
   const failed = state.query === search && state.failed;
 
+  // refreshKey (session-list version) re-runs the search when the sidebar
+  // list reloads, so results never lag behind a rename/archive/delete.
   useEffect(() => {
     if (!open || !search) return;
     const controller = new AbortController();

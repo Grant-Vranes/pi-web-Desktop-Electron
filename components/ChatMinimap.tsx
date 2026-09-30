@@ -39,6 +39,8 @@ interface TurnInfo {
   userMessage: UserMessage | CustomMessage;
   assistantPreviews: AssistantPreview[];
   scrollTop: number | null;
+  /** Tool calls issued anywhere in this turn's assistant replies. */
+  toolCount: number;
 }
 
 interface NodeInfo {
@@ -54,6 +56,7 @@ function makePlaceholderTurn(anchor: TurnAnchor): TurnInfo {
     userMessage: { role: "user", content: anchor.preview } as UserMessage,
     assistantPreviews: [],
     scrollTop: null,
+    toolCount: 0,
   };
 }
 
@@ -92,6 +95,16 @@ function getUserPreview(message: UserMessage | CustomMessage): string {
     .map((block) => block.text)
     .join("\n")
     .trim();
+}
+
+/** Tool calls in one assistant message. A reply can both answer and call
+ *  tools, so this counts blocks rather than text-less messages. */
+export function countToolCalls(message: AgentMessage | Partial<AgentMessage>): number {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return 0;
+  return message.content.reduce(
+    (total, block) => total + (block.type === "toolCall" ? 1 : 0),
+    0,
+  );
 }
 
 function getAssistantAnswerMarkdown(message: AgentMessage | Partial<AgentMessage>): string {
@@ -403,12 +416,14 @@ export function ChatMinimap({
             scrollTop: elementRect
               ? elementRect.top - containerRect.top + scrollEl.scrollTop
               : null,
+            toolCount: 0,
           };
           turns.push(currentTurn);
           continue;
         }
 
         if (!currentTurn) continue;
+        currentTurn.toolCount += countToolCalls(message);
         const answerMarkdown = getAssistantAnswerMarkdown(message);
         if (answerMarkdown) {
           currentTurn.assistantPreviews.push({
@@ -693,8 +708,20 @@ export function ChatMinimap({
             data-minimap-preview-index={node.index}
             data-located={isLocated ? "true" : undefined}
           >
-            <span className={styles.number} aria-hidden="true">
-              {String(node.index + 1).padStart(2, "0")}
+            <span className={styles.number}>
+              <span aria-hidden="true">
+                {String(node.index + 1).padStart(2, "0")}
+              </span>
+              {node.targetTurn.toolCount > 0 && (
+                <span
+                  className={styles.toolBadge}
+                  role="img"
+                  title={t("chatMinimap.toolCalls", { count: node.targetTurn.toolCount })}
+                  aria-label={t("chatMinimap.toolCalls", { count: node.targetTurn.toolCount })}
+                >
+                  {node.targetTurn.toolCount > 99 ? "99+" : node.targetTurn.toolCount}
+                </span>
+              )}
             </span>
             <div className={styles.content}>
               <button
@@ -809,7 +836,7 @@ export function ChatMinimap({
                   zIndex: 2,
                 }}
               >
-                <div
+<div
                   style={{
                     width: 8,
                     height: 8,

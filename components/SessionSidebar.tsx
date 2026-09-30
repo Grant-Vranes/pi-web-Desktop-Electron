@@ -19,6 +19,8 @@ import type { WorktreeEntry, WorktreeState } from "@/lib/worktree-types";
 import type { RunningRpcSessionDetail } from "@/lib/rpc-manager";
 import { calendarDaysAgo, formatSessionTimestamp, formatDayLabel } from "@/lib/i18n/format";
 import { useI18n } from "@/hooks/useI18n";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
+import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import type { FileTabMutation } from "./file-tab-state";
@@ -109,6 +111,12 @@ function ToolbarIconButton({
   );
 }
 
+function sessionListUrl(summary: boolean, force: boolean): string {
+  if (summary) return "/api/sessions?summary=1";
+  if (force) return "/api/sessions?force=1";
+  return "/api/sessions";
+}
+
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean, entryId?: string, blockIndex?: number) => void;
@@ -158,6 +166,11 @@ const RUNNING_SESSIONS_POLL_MS = 2500;
 // Grace period before the rail tooltip closes after the pointer leaves the
 // tile/card, so crossing the gap between them never blinks the card.
 const PROJECT_RAIL_TOOLTIP_HIDE_DELAY_MS = 160;
+const SESSION_DETAILS_HYDRATION_DELAY_MS = 750;
+const SESSION_PANE_DEFAULT_HEIGHT = 320;
+const SESSION_PANE_MIN_HEIGHT = 80;
+const EXPLORER_PANE_MIN_HEIGHT = 120;
+const SESSION_PANE_MAX_HEIGHT = 1600;
 
 function loadLastCustomCwd(): string {
   if (typeof window === "undefined") return "";
@@ -502,10 +515,12 @@ function PiWebTitle({ projectName }: { projectName: string | null }) {
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t, locale } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
-  const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
+  // Tracked in a ref only: the version is compared against the polled value to
+  // decide whether the list needs reloading, and no render reads it.
   const sessionListVersionRef = useRef<number | null>(null);
   const sessionLoadIdRef = useRef(0);
   const [loading, setLoading] = useState(true);
+  const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
@@ -567,6 +582,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Once polling has delivered a snapshot it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
   const runningPollAuthoritativeRef = useRef(false);
+  const detailsHydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
@@ -575,11 +591,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // virtualIndices) was dropped in favor of HEAD's day-group rendering.
   // getSessionListIndices stays exported for its unit tests.
 
-  const loadSessions = useCallback(async (showLoading = false, force = false) => {
+  const loadSessions = useCallback(async (showLoading = false, force = false, summary = false) => {
     const loadId = ++sessionLoadIdRef.current;
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch(force ? "/api/sessions?force=1" : "/api/sessions", {
+      const res = await fetch(sessionListUrl(summary, force), {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -630,7 +646,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   useEffect(() => {
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
-    loadSessions(isFirst, !isFirst);
+    let active = true;
+
+    if (isFirst) {
+      // Header/stat metadata is enough to select the URL session and paint the
+      // sidebar. Hydrate exact counts, names, and first messages once the
+      // selected chat has had a chance to start loading.
+      void loadSessions(true, false, true).then(() => {
+        if (!active) return;
+        detailsHydrationTimerRef.current = setTimeout(() => {
+          detailsHydrationTimerRef.current = null;
+          if (active) void loadSessions(false, true);
+        }, SESSION_DETAILS_HYDRATION_DELAY_MS);
+      });
+    } else {
+      void loadSessions(false, true);
+    }
+
+    return () => {
+      active = false;
+      if (detailsHydrationTimerRef.current) {
+        clearTimeout(detailsHydrationTimerRef.current);
+        detailsHydrationTimerRef.current = null;
+      }
+    };
   }, [loadSessions, refreshKey]);
 
   // Browser storage is unavailable during server rendering. Restore the panel
@@ -928,7 +967,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     : undefined;
   const currentWorktreePath = currentWorktree?.path ?? null;
 
-  const commitCustomPath = useCallback(async (candidate?: string) => {
+  const commitCustomPath = useCallback(async (candidate?: string, { remember = true } = {}) => {
     const path = (candidate ?? customPathValue).trim();
     if (!path || customPathValidating) return;
 
@@ -1039,7 +1078,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } catch {
       // ignore
     }
-  }, []);
+  }, [commitCustomPath]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1103,7 +1142,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const recentProjects = useMemo(() => getRecentProjects(allSessions), [allSessions]);
 
   // Sessions of every worktree in the selected project are shown together
-  const selectedProject = projectFor(selectedCwd);
+  const selectedProject = useMemo(() => projectFor(selectedCwd), [projectFor, selectedCwd]);
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -1332,6 +1371,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const [scrollTargetSessionId, setScrollTargetSessionId] = useState<string | null>(null);
   const conversationsListRef = useRef<HTMLDivElement>(null);
+  const explorerScrollRef = useRef<HTMLDivElement>(null);
   // Jumping to a session from the project-rail tooltip: expand the day group
   // holding it (if collapsed), then scroll its row to the top of the visible
   // list so the selected record is always in view.
@@ -1815,7 +1855,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             display: "flex",
             flexDirection: "column",
             flex: explorerOpen ? "1 1 0" : "0 0 auto",
-            minHeight: 0,
+            minHeight: explorerOpen ? EXPLORER_PANE_MIN_HEIGHT : 0,
             overflow: "hidden",
           }}
         >
@@ -1947,7 +1987,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </ToolbarIconButton>
           </div>
           {explorerOpen && (
-            <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+            <div ref={explorerScrollRef} className="scrollbar-subtle" style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
               <FileExplorer
                 ref={fileExplorerRef}
                 cwd={selectedCwd ?? selectedCwdProp!}
@@ -3290,7 +3330,9 @@ function SessionItem({
                 <span title={session.modified} style={{ flexShrink: 0 }}>{formatSessionTimestamp(session.modified, locale)}</span>
               )}
               <span style={{ margin: "0 6px", color: "var(--border)", flexShrink: 0 }} aria-hidden="true">·</span>
-              <span style={{ flexShrink: 0 }}>{t("sidebar.messagesCount", { count: session.messageCount })}</span>
+              <span style={{ flexShrink: 0 }}>
+                {session.detailsPending ? "…" : t("sidebar.messagesCount", { count: session.messageCount })}
+              </span>
               {session.isWorktree && session.branch && (
                 <>
                   <span style={{ margin: "0 6px", color: "var(--border)", flexShrink: 0 }} aria-hidden="true">·</span>

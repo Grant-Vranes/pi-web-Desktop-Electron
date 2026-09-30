@@ -7,6 +7,7 @@ const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconf
 const { getSessionListIndices } = await jiti.import("./SessionSidebar.tsx");
 
 const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
+const globalStyles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const sessionItemSource = source.slice(source.indexOf("function SessionItem("));
 
 test("scrolling keeps the focused session and the viewport mounted without expanding the whole window", () => {
@@ -109,9 +110,13 @@ test("offers the downstream context-menu hook only on a normal session row", () 
 });
 
 test("lifecycle refreshes bypass the cache while cross-window polling reuses it", () => {
-  assert.match(source, /force \? "\/api\/sessions\?force=1" : "\/api\/sessions"/);
+  assert.match(source, /function sessionListUrl\(summary: boolean, force: boolean\)/);
+  assert.match(source, /if \(summary\) return "\/api\/sessions\?summary=1"/);
+  assert.match(source, /if \(force\) return "\/api\/sessions\?force=1"/);
   assert.match(source, /cache: "no-store"/);
-  assert.match(source, /loadSessions\(isFirst, !isFirst\)/);
+  // First paint uses the cheap summary listing, then hydrates after a delay.
+  assert.match(source, /loadSessions\(true, false, true\)/);
+  assert.match(source, /setTimeout\(\(\) => \{[\s\S]*?void loadSessions\(false, true\)/);
   assert.match(source, /data\.sessionListVersion !== sessionListVersionRef\.current[\s\S]*?await loadSessions\(\)/);
   // Local change kept over upstream: the manual refresh ToolbarIconButton with
   // green feedback stays in the conversations actions row, alongside upstream's

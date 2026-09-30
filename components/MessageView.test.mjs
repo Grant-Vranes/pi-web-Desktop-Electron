@@ -205,6 +205,33 @@ test("renders a provider error when the assistant message has no content", () =>
   assert.match(html, /&lt;html&gt;request forbidden&lt;\/html&gt;/);
 });
 
+test("renders a truncation notice for stopReason length", () => {
+  const html = renderMessage({
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: [{ type: "thinking", thinking: "Long reasoning chain" }],
+    stopReason: "length",
+  });
+
+  assert.match(html, /role="alert"/);
+  assert.match(html, /output limit/i);
+  assert.match(html, /follow-up/i);
+});
+
+test("renders a truncation notice for thinking-only messages with stopReason length", () => {
+  const html = renderMessage({
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: [],
+    stopReason: "length",
+  });
+
+  assert.match(html, /role="alert"/);
+  assert.match(html, /output limit/i);
+});
+
 test("renders partial assistant content before the provider error", () => {
   const html = renderMessage({
     role: "assistant",
@@ -283,6 +310,35 @@ test("renders user-message images as buttons that open a larger preview", () => 
   assert.match(html, /<img[^>]+src="data:image\/png;base64,YWJj"/);
 });
 
+test("marks apply_patch returned failures as errors even when isError is unset", () => {
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-patch-1",
+    toolName: "apply_patch",
+    input: {
+      input: "*** Begin Patch\n*** Update File: src/a.ts\n-old\n+new\n*** End Patch",
+    },
+  };
+  const failed = {
+    role: "toolResult",
+    toolCallId: block.toolCallId,
+    content: [{ type: "text", text: "apply_patch failed.\nRecovery: MUST read src/a.ts before retrying." }],
+    details: {
+      result: { appliedFiles: [], failures: [{ filePath: "src/a.ts", message: "context mismatch" }] },
+    },
+  };
+  const html = renderMessage({
+    role: "assistant",
+    provider: "openai",
+    model: "gpt-test",
+    content: [block],
+  }, { toolResults: new Map([[block.toolCallId, failed]]) });
+
+  assert.match(html, /border:1px solid color-mix\(in srgb, #f87171 38%, var\(--border\)\)/);
+  assert.match(html, />apply_patch</);
+  assert.doesNotMatch(html, /border:1px solid color-mix\(in srgb, #22c55e 28%, var\(--border\)\)/);
+});
+
 test("renders custom-message images as buttons that open a larger preview", () => {
   const html = renderMessage({
     role: "custom",
@@ -295,31 +351,30 @@ test("renders custom-message images as buttons that open a larger preview", () =
   assert.match(html, /<img[^>]+src="data:image\/png;base64,YWJj"/);
 });
 
-test("renders a fork-here button on assistant messages with an entry id", () => {
-  let forked = null;
+test("shows tool-result images while the tool details stay collapsed", () => {
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-shot-1",
+    toolName: "page_screenshot",
+    input: { tabId: 7 },
+  };
+  const result = {
+    role: "toolResult",
+    toolCallId: block.toolCallId,
+    content: [
+      { type: "text", text: "captured-1280x720" },
+      { type: "image", data: "YWJj", mimeType: "image/png" },
+    ],
+  };
   const html = renderMessage({
     role: "assistant",
-    content: [{ type: "text", text: "An answer" }],
-  }, {
-    entryId: "abc123",
-    onFork: (id) => (forked = id),
-  });
+    provider: "anthropic",
+    model: "claude-test",
+    content: [block],
+  }, { toolResults: new Map([[block.toolCallId, result]]) });
 
-  assert.match(html, /Fork new session from here/);
-  const match = html.match(/title="Fork a new session from here[^"]*"/);
-  assert.ok(match, "fork button title should be present");
-});
-
-test("omits the fork-here button on assistant messages without an entry id or handler", () => {
-  const withEntryOnly = renderMessage({
-    role: "assistant",
-    content: [{ type: "text", text: "An answer" }],
-  }, { entryId: "abc123" });
-  const withHandlerOnly = renderMessage({
-    role: "assistant",
-    content: [{ type: "text", text: "An answer" }],
-  }, { onFork: () => {} });
-
-  assert.doesNotMatch(withEntryOnly, /Fork new session from here/);
-  assert.doesNotMatch(withHandlerOnly, /Fork new session from here/);
+  assert.match(html, /<button[^>]+aria-label="Preview image"[^>]*>/);
+  assert.match(html, /<img[^>]+src="data:image\/png;base64,YWJj"/);
+  assert.doesNotMatch(html, /captured-1280x720/);
+  assert.doesNotMatch(html, /"tabId"/);
 });

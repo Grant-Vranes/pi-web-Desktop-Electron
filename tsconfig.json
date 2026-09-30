@@ -38,6 +38,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src-tauri"
+    "src-tauri",
+    "demo"
   ]
 }
