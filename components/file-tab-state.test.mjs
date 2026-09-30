@@ -140,6 +140,7 @@ test("a remounted viewer ignores the previous revision's late cleanup", () => {
   assert.equal(stale[0].viewerState.displayMode, "diff");
 });
 
+<<<<<<< HEAD
 test("renaming or moving an open tab replaces its path, id, and label", () => {
   const mutation = { kind: "move", sourcePath: "/repo/a.ts", destinationPath: "/repo/src/b.ts" };
   const next = applyFileTabMutation([tabA, tabB], mutation);
@@ -270,4 +271,28 @@ test("a mutation for another path preserves tabs and the active id", () => {
 
   assert.strictEqual(applyFileTabMutation(tabs, mutation), tabs);
   assert.equal(getNextActiveFileTabId(tabs, tabA.id, mutation), tabA.id);
+=======
+test("a PDF page link remounts the viewer so the document jumps", () => {
+  const [next] = openFileTab([tabA], { ...openA, page: 12 });
+  assert.equal(next.page, 12);
+  assert.equal(next.viewerRevision, 1);
+  assert.strictEqual(next.viewerState, tabA.viewerState);
+});
+
+test("reopening the same PDF page keeps the viewer mounted", () => {
+  const tabs = [{ ...tabA, page: 12 }];
+  assert.strictEqual(openFileTab(tabs, { ...openA, page: 12 }), tabs);
+});
+
+test("opening another page of the same PDF increments the revision", () => {
+  const [next] = openFileTab([{ ...tabA, page: 12 }], { ...openA, page: 13 });
+  assert.equal(next.page, 13);
+  assert.equal(next.viewerRevision, 1);
+});
+
+test("opening a PDF without a page fragment clears a previous jump", () => {
+  const [next] = openFileTab([{ ...tabA, page: 12 }], openA);
+  assert.equal(next.page, undefined);
+  assert.equal(next.viewerRevision, 1);
+>>>>>>> upstream/main
 });

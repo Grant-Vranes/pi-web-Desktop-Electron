@@ -35,7 +35,7 @@ test("explicit context changes invalidate a pending workspace restore", () => {
 test("all active-session transitions share one persistence effect", () => {
   assert.match(
     source,
-    /useEffect\(\(\) => \{\s+if \(!selectedSession\) return;[\s\S]*?setLastOpenSession\(projectKey, selectedSession\.id\);\s+\}, \[selectedSession\]\);/,
+    /useEffect\(\(\) => \{\s+if \(selectedSession\) \{[\s\S]*?setLastOpenSession\(projectKey, selectedSession\.id\);\s+setTabOpenSession\(selectedSession\.id\);\s+return;\s+\}\s+if \(newSessionCwd\) setTabOpenNewSession\(newSessionCwd\);\s+\}, \[newSessionCwd, selectedSession\]\);/,
   );
 });
 
@@ -103,6 +103,7 @@ test("New restores the draft after session navigation and workspace auto-restore
         newSessionCwd: cwd,
         newSessionDraftId: "initial",
         selectedSession: null,
+        sessionCatalog: [],
         sessionKey: 0,
       });
       context.invalidateWorkspaceRestore = () => context.workspaceRestoreTokenRef.current++;
@@ -119,6 +120,16 @@ test("New restores the draft after session navigation and workspace auto-restore
       const makeCleanup = vm.runInContext(stripTypeScriptTypes(`((isNew, newSessionDraftKey) => {
         const sessionHookMountedRef = { current: true };
         const newSessionPromotedRef = { current: false };
+        const sessionIdRef = { current: null };
+        const dataRef = { current: null };
+        const messagesRef = { current: [] };
+        const entryIdsRef = { current: [] };
+        const activeLeafIdRef = { current: null };
+        const historyCursorRef = { current: null };
+        const hasEarlierMessagesRef = { current: false };
+        const getSessionViewSnapshot = () => null;
+        const setSessionViewSnapshot = () => false;
+        const deleteSessionViewSnapshot = () => {};
         ${hookSource.slice(cleanupStart, cleanupEnd)}
       })`), context);
       let mountedKey = context.sessionKey;

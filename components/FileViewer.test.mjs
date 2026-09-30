@@ -75,3 +75,8 @@ test("dispatches .drawio files to DrawioViewer before the text fallback", () => 
   // excalidraw 分支不受影响
   assert.match(source, /isExcalidrawPath\(filePath\) && !textFallback/);
 });
+
+test("markdown preview links carry PDF page fragments", () => {
+  assert.match(source, /parsePdfPageFragment/);
+  assert.match(source, /onOpenFile\(linkedFile, parsePdfPageFragment\(href\) \?\? undefined\)/);
+});

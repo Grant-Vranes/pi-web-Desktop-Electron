@@ -143,6 +143,7 @@ desktop/         Electron 桌面端封装（托盘 / Dock 指示、原生菜单�
 bin/             npm CLI 入口与启动参数解析
 public/          静态资源与 PWA 文件
 docs/            用户与贡献者文档
+demo/            静态浏览器 demo（发布到 GitHub Pages，见 demo/README.md）
 ```
 
 架构细节与文件地图见 [AGENTS.md](./AGENTS.md)；上游原版 README 见 [README_Original/README.md](./README_Original/README.md)。

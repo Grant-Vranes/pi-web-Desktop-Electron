@@ -9,6 +9,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { gt, maxSatisfying, rcompare, valid, validRange } from "semver";
 import type { PluginScope, PluginUpdateResult } from "@/lib/api-types";
+import { nodeCliInvocation } from "./node-cli";
+import { parseNpmSource } from "./npm-source";
 import { getProjectTrustStatus } from "./project-trust";
 
 const execFileAsync = promisify(execFile);
@@ -31,25 +33,8 @@ type CheckOptions = {
   runCommand?: CommandRunner;
 };
 
-type ParsedNpmSource = {
-  name: string;
-  spec: string;
-  version?: string;
-};
-
 function toPluginScope(scope: ConfiguredPackage["scope"]): PluginScope {
   return scope === "project" ? "project" : "global";
-}
-
-function parseNpmSource(source: string): ParsedNpmSource | undefined {
-  if (!source.startsWith("npm:")) return undefined;
-  const spec = source.slice(4).trim();
-  const match = spec.match(/^(@?[^@]+(?:\/[^@]+)?)(?:@(.+))?$/);
-  return {
-    name: match?.[1] ?? spec,
-    spec,
-    version: match?.[2],
-  };
 }
 
 function hasGitRef(source: string): boolean {
@@ -97,7 +82,10 @@ async function runCommand(
   args: string[],
   options: { cwd: string; env?: NodeJS.ProcessEnv },
 ): Promise<string> {
-  const { stdout } = await execFileAsync(command, args, {
+  // A bare `npm` resolves to `npm.cmd` on Windows, which `execFile` cannot
+  // spawn (CVE-2024-27980); run the bundled `npm-cli.js` through `node`.
+  const invocation = command === "npm" ? nodeCliInvocation("npm", args) : { command, args };
+  const { stdout } = await execFileAsync(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: options.env ? { ...process.env, ...options.env } : process.env,
     encoding: "utf8",

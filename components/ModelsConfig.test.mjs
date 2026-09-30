@@ -5,11 +5,15 @@ import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const {
+  collectModelRenames,
   hasModelCostDraftValue,
   modelCostToDraft,
   parseCompleteModelCost,
+  renameProviderEntry,
+  savedModelIds,
   serializeHeaderRows,
   setCompatBool,
+  trackAddedModels,
   updateHeaderRow,
 } = await jiti.import("./models-config-helpers.ts");
 
@@ -185,4 +189,109 @@ test("thinking level overrides keep explicit default, disabled, and custom contr
   assert.match(editor, /state === "omit"/);
   assert.match(editor, /state === "null"/);
   assert.match(editor, /state === "string"/);
+});
+
+const draft = (models) => ({ providers: { stepfun: { models: models.map((id) => ({ id })) } } });
+
+test("a model renamed in place is reported with its saved reference", () => {
+  const slots = savedModelIds(draft(["aaa", "ddd"]));
+  assert.deepEqual(
+    collectModelRenames(draft(["aaa", "ddd1"]), slots, new Map()),
+    [{ from: "stepfun/ddd", to: "stepfun/ddd1" }],
+  );
+});
+
+test("a model rename keeps the provider id the settings file still spells", () => {
+  const slots = savedModelIds(draft(["aaa", "ddd"]));
+  // The panel renamed the provider too, so the slots moved with it.
+  const moved = new Map([["house", slots.get("stepfun")]]);
+  assert.deepEqual(
+    collectModelRenames(
+      { providers: { house: { models: [{ id: "aaa" }, { id: "ddd1" }] } } },
+      moved,
+      new Map([["stepfun", "house"]]),
+    ),
+    [{ from: "stepfun/ddd", to: "house/ddd1" }],
+  );
+});
+
+test("added and removed models never look like a rename", () => {
+  const slots = savedModelIds(draft(["aaa", "ddd"]));
+  trackAddedModels(slots, "stepfun", 1);
+  assert.deepEqual(collectModelRenames(draft(["aaa", "ddd", "new"]), slots, new Map()), []);
+
+  const spliced = savedModelIds(draft(["aaa", "ddd"]));
+  spliced.get("stepfun").splice(0, 1);
+  assert.deepEqual(collectModelRenames(draft(["ddd"]), spliced, new Map()), []);
+});
+
+test("a blank id in a half-typed row is not a rename yet", () => {
+  const slots = savedModelIds(draft(["aaa", "ddd"]));
+  assert.deepEqual(collectModelRenames(draft(["aaa", ""]), slots, new Map()), []);
+});
+
+test("a provider added since the last save has no saved slots to compare", () => {
+  assert.deepEqual(collectModelRenames(draft(["aaa"]), new Map(), new Map()), []);
+});
+
+const tracking = (config) => ({
+  savedProviders: new Set(Object.keys(config.providers)),
+  renames: new Map(),
+  slots: savedModelIds(config),
+});
+
+test("renaming a provider keeps its place and moves its rename tracking", () => {
+  const config = {
+    providers: {
+      first: { models: [{ id: "a" }] },
+      stepfun: { baseUrl: "https://x", models: [{ id: "aaa" }, { id: "ddd" }] },
+      last: {},
+    },
+  };
+  const state = tracking(config);
+  const renamed = renameProviderEntry(config, state, "stepfun", "house");
+
+  assert.deepEqual(Object.keys(renamed.providers), ["first", "house", "last"]);
+  assert.equal(renamed.providers.house, config.providers.stepfun);
+  assert.deepEqual([...state.renames], [["stepfun", "house"]]);
+  assert.deepEqual(state.slots.get("house"), ["aaa", "ddd"]);
+  assert.equal(state.slots.has("stepfun"), false);
+  // Renaming it back cancels the move instead of recording stepfun -> stepfun.
+  renameProviderEntry(renamed, state, "house", "stepfun");
+  assert.deepEqual([...state.renames], []);
+});
+
+test("renaming a provider onto another provider's id changes nothing", () => {
+  const config = { providers: { one: { models: [{ id: "a" }] }, two: { models: [{ id: "b" }] } } };
+  const state = tracking(config);
+  assert.equal(renameProviderEntry(config, state, "one", "two"), null);
+  assert.equal(renameProviderEntry(config, state, "gone", "three"), null);
+  assert.deepEqual([...state.renames], []);
+  assert.deepEqual([...state.slots.keys()], ["one", "two"]);
+});
+
+test("a provider added since the last save is renamed without a settings rewrite", () => {
+  const config = { providers: { "new-provider": {} } };
+  const state = { savedProviders: new Set(), renames: new Map(), slots: new Map() };
+  const renamed = renameProviderEntry(config, state, "new-provider", "house");
+  assert.deepEqual(Object.keys(renamed.providers), ["house"]);
+  assert.deepEqual([...state.renames], []);
+});
+
+test("Save applies a provider name typed without pressing Rename", () => {
+  const providerDetail = source.slice(
+    source.indexOf("function ProviderDetail"),
+    source.indexOf("// ── ThinkingLevelMap editor"),
+  );
+  // The field edits the panel's draft, not state the Save button cannot see.
+  assert.doesNotMatch(providerDetail, /useState\(name\)/);
+  assert.match(providerDetail, /onChange=\{onEditingNameChange\}/);
+
+  const save = source.slice(
+    source.indexOf("const handleSave = useCallback"),
+    source.indexOf("const providers = Object.entries(config.providers"),
+  );
+  assert.match(save, /applyProviderRename\(config, providerNameDraft\.provider, pendingName\)/);
+  assert.match(save, /body: JSON\.stringify\(draft\)/);
+  assert.match(save, /collectModelRenames\(draft,/);
 });
