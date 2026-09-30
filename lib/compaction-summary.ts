@@ -20,8 +20,12 @@ export function parseCompactionSummary(summary: string): ParsedCompactionSummary
       .map((line) => line.trim())
       .filter(Boolean);
 
-    if (section === "read-files") readFiles.push(...files);
-    else modifiedFiles.push(...files);
+    const push = (list: string[], files: string[]) => {
+      for (const f of files) if (!list.includes(f)) list.push(f);
+    };
+
+    if (section === "read-files") push(readFiles, files);
+    else push(modifiedFiles, files);
 
     return "";
   });
