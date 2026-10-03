@@ -18,6 +18,13 @@
   "engines": {
     "node": ">=22.19.0"
   },
+  "browserslist": [
+    "chrome 111",
+    "edge 111",
+    "firefox 111",
+    "safari 16.2",
+    "ios_saf 16.2"
+  ],
   "bin": {
     "pi-web": "bin/pi-web.js"
   },
@@ -68,10 +75,10 @@
     "@codemirror/legacy-modes": "^6.5.4",
     "@codemirror/state": "^6.7.4",
     "@codemirror/view": "^6.43.11",
-    "@earendil-works/pi-agent-core": "0.87.1",
-    "@earendil-works/pi-ai": "0.87.1",
-    "@earendil-works/pi-coding-agent": "0.87.1",
-    "@earendil-works/pi-tui": "0.87.1",
+    "@earendil-works/pi-agent-core": "0.99.1",
+    "@earendil-works/pi-ai": "0.99.1",
+    "@earendil-works/pi-coding-agent": "0.99.1",
+    "@earendil-works/pi-tui": "0.99.1",
     "@excalidraw/excalidraw": "^0.18.1",
     "@lezer/highlight": "^1.2.3",
     "@uiw/react-codemirror": "^4.25.11",

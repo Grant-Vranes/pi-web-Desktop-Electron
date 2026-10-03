@@ -6,6 +6,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import type { Plugin } from "unified";
+import type { Extension } from "micromark-util-types";
 
 const markdownSanitizeSchema = {
   ...defaultSchema,
@@ -24,10 +26,41 @@ export function markdownUrlTransform(value: string): string {
   return /^file:/i.test(value) ? value : defaultUrlTransform(value);
 }
 
-const escapedInlineCodePattern = /(?<![\\`])`((?:[^`\n]|\\`)+?)(?<![\\`])`(?!`)/g;
+/**
+ * `value.replace(pattern, replace)` as if `pattern` began with the lookbehind
+ * `(?<![notAfter])`: a match starts with `opener` and must not follow any
+ * character of `notAfter`. Safari only parses lookbehind from 16.4, and one
+ * regex literal it cannot parse fails the whole script chunk, which left iOS
+ * 16.2 on a blank page (#753). The sticky `pattern` is tried at each `opener`
+ * in turn, the order in which the lookbehind version tries start positions.
+ */
+function replaceNotPrecededBy(
+  value: string,
+  opener: string,
+  notAfter: string,
+  pattern: RegExp,
+  replace: (match: RegExpExecArray) => string,
+): string {
+  let result = "";
+  let copied = 0;
+  for (let index = value.indexOf(opener); index !== -1; index = value.indexOf(opener, index + 1)) {
+    if (index > 0 && notAfter.includes(value[index - 1])) continue;
+    pattern.lastIndex = index;
+    const match = pattern.exec(value);
+    if (!match) continue;
+    result += value.slice(copied, index) + replace(match);
+    copied = pattern.lastIndex;
+    index = copied - 1;
+  }
+  return result + value.slice(copied);
+}
+
+// The closing backtick must not follow `\` or another backtick, so the content
+// ends with a character that is neither.
+const escapedInlineCodePattern = /`((?:[^`\n]|\\`)*?[^\\`\n])`(?!`)/y;
 
 function rewriteEscapedInlineCodeBackticks(line: string): string {
-  return line.replace(escapedInlineCodePattern, (match, content: string) => {
+  return replaceNotPrecededBy(line, "`", "\\`", escapedInlineCodePattern, ([match, content]) => {
     const code = content.replace(/\\`/g, "`");
     if (code === content) return match;
     const marker = "`".repeat(Math.max(...(code.match(/`+/g)?.map((run) => run.length) ?? [0])) + 1);
@@ -333,6 +366,9 @@ function updateInlineCodeMarker(line: string, initialMarkerSize: number): number
   return markerSize;
 }
 
+// `\(` … `\)` whose closing backslash is not itself escaped.
+const inlineLatexMathPattern = /\\\(([^`\r\n$]*?[^`\r\n$\\])\\\)/y;
+
 function normalizeInlineLatexMath(line: string): string {
   if (
     /^\s{0,3}\[[^\]]+\]:/.test(line) ||
@@ -344,9 +380,8 @@ function normalizeInlineLatexMath(line: string): string {
     return line;
   }
 
-  return line.replace(
-    /(?<!\\)\\\(([^`\r\n$]+?)(?<!\\)\\\)/g,
-    (match, math: string) => (math.trim() ? `$${math}$` : match),
+  return replaceNotPrecededBy(line, "\\(", "\\", inlineLatexMathPattern, ([match, math]) =>
+    math.trim() ? `$${math}$` : match,
   );
 }
 
@@ -439,17 +474,107 @@ function remarkSplitAutolinkLiterals() {
   };
 }
 
+// Reject ambiguous single-dollar pairs during tokenization, before math can
+// swallow Markdown emphasis or links. A price's next dollar ("$20 ... $6")
+// cannot close math, nor can the space before a later formula ("$20 and $x$").
+// Keep the upstream tokenizer/resolver for real math, code, escapes and $$.
+const remarkCurrencySafeMath: Plugin = function () {
+  remarkMath.call(this);
+  const data = this.data() as { micromarkExtensions?: Extension[] };
+  const extension = data.micromarkExtensions?.at(-1);
+  const constructs = extension?.text?.[36];
+  for (const construct of Array.isArray(constructs) ? constructs : constructs ? [constructs] : []) {
+    if (construct.name !== "mathText") continue;
+    const tokenize = construct.tokenize;
+    construct.tokenize = function (effects, ok, nok) {
+      const start = this.now();
+      return tokenize.call(this, effects, (code) => {
+        const source = this.sliceSerialize({ start, end: this.now() });
+        if (source.startsWith("$") && !source.startsWith("$$")) {
+          const content = source.slice(1, -1);
+          const startsWithAmount = /^\s*[+-]?(?:\d|\.\d)/.test(content);
+          const closesBeforeNumber = code !== null && code >= 48 && code <= 57;
+          // Balanced padding ($ x + y $) remains supported, as does multiline
+          // math. A one-sided space is prose, not an inline-math boundary.
+          const mismatchedPadding = /^\s/.test(content) !== /\s$/.test(content);
+          if (startsWithAmount && (closesBeforeNumber || mismatchedPadding)) return nok(code);
+        }
+        return ok(code);
+      }, nok);
+    };
+  }
+};
+
 export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkFrontmatter, ["yaml"]],
   [remarkGfm, remarkGfmOptions],
   remarkSplitAutolinkLiterals,
-  remarkMath,
+  remarkCurrencySafeMath,
+];
+
+// User messages keep every typed line break, as the TUI shows them (#680). The
+// `.markdown-user-message p` pre-wrap rule only reaches paragraphs, so a soft
+// break in a tight list item ("1. question\nA. option") or a heading collapsed
+// into a space, and Chrome renders a lone `\r` as a space even under pre-wrap.
+// Every line ending in text therefore becomes a <br>. It is a custom node that
+// remark-rehype turns into a bare <br> through `data.hName`, not an mdast
+// `break`: remark-rehype follows that <br> with a "\n" text node, which the
+// pre-wrap rule renders as a second break, so hard breaks are swapped too. Code,
+// inline code, math and raw HTML are other node types and keep their text.
+interface MarkdownTreeNode {
+  type: string;
+  value?: string;
+  children?: MarkdownTreeNode[];
+  data?: { hName?: string };
+}
+
+const LINE_ENDING = /[ \t]*(?:\r\n|\r|\n)[ \t]*/;
+const PHRASING_BLOCK_TYPES = new Set(["paragraph", "heading", "tableCell"]);
+// Raw-text elements take everything up to their closing tag as text, and
+// rehype-raw leaves that state at the next element, so a <br> placed after an
+// unclosed `<textarea>` or `<script>` garbles or drops the rest of the block.
+const RAW_TEXT_OPEN_TAG = /^<(?:iframe|noembed|noframes|noscript|plaintext|script|style|textarea|title|xmp)(?=[\s/>]|$)/i;
+
+function opensRawTextElement(node: MarkdownTreeNode): boolean {
+  if (node.type === "html") return RAW_TEXT_OPEN_TAG.test(node.value ?? "");
+  return node.children?.some(opensRawTextElement) ?? false;
+}
+
+function lineBreakNode(): MarkdownTreeNode {
+  return { type: "lineBreak", data: { hName: "br" } };
+}
+
+function keepLineBreaks(parent: MarkdownTreeNode): void {
+  if (!parent.children) return;
+  // Such a block keeps the default rendering: its paragraph newlines still
+  // show through the pre-wrap rule.
+  if (PHRASING_BLOCK_TYPES.has(parent.type) && opensRawTextElement(parent)) return;
+  parent.children = parent.children.flatMap((node) => {
+    if (node.type === "break") return [lineBreakNode()];
+    if (node.type !== "text" || !node.value) {
+      keepLineBreaks(node);
+      return [node];
+    }
+    return node.value.split(LINE_ENDING).flatMap((line, index) => [
+      ...(index > 0 ? [lineBreakNode()] : []),
+      ...(line ? [{ type: "text", value: line }] : []),
+    ]);
+  });
+}
+
+function remarkKeepLineBreaks() {
+  return (tree: MarkdownTreeNode) => keepLineBreaks(tree);
+}
+
+export const markdownUserRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
+  ...(markdownRemarkPlugins ?? []),
+  remarkKeepLineBreaks,
 ];
 export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkFrontmatter, ["yaml"]],
   [remarkGfm, remarkGfmOptions],
   remarkSplitAutolinkLiterals,
-  remarkMath,
+  remarkCurrencySafeMath,
 ];
 
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [

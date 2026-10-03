@@ -295,3 +295,16 @@ test("Save applies a provider name typed without pressing Rename", () => {
   assert.match(save, /body: JSON\.stringify\(draft\)/);
   assert.match(save, /collectModelRenames\(draft,/);
 });
+
+test("model discovery is not gated on a configured base URL", () => {
+  const providerDetail = source.slice(
+    source.indexOf("function ProviderDetail"),
+    source.indexOf("// ── ThinkingLevelMap editor"),
+  );
+  // pi resolves the endpoint for a provider that only lists models, so an empty
+  // Base URL must still let the user fetch the upstream list.
+  assert.match(providerDetail, /if \(discoveryState\.phase === "loading"\) return;/);
+  assert.match(providerDetail, /disabled=\{discoveryState\.phase === "loading"\}/);
+  assert.doesNotMatch(providerDetail, /!provider\.baseUrl\?\.trim\(\)/);
+  assert.match(providerDetail, /Leave empty for a built-in provider to use the endpoint pi ships/);
+});

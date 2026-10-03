@@ -24,6 +24,8 @@ interface Props {
   hideInlineButton?: boolean;
   /** Desktop dropdown width, normally matched to the sidebar project picker. */
   inlineDropdownWidth?: number;
+  /** The session is running: the tree stays readable but branches cannot be switched */
+  locked?: boolean;
 }
 
 // Find the visible entry IDs on the path from root to activeLeafId.
@@ -124,7 +126,8 @@ interface TreeNodeProps {
   depth: number;
   isLast: boolean;
   parentLines: boolean[]; // whether ancestor at each depth has more siblings after
-  onSelect: (id: string) => void;
+  /** Absent while switching is locked */
+  onSelect?: (id: string) => void;
 }
 
 function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelect }: TreeNodeProps) {
@@ -146,9 +149,9 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
           display: "flex",
           alignItems: "center",
           height: 24,
-          cursor: "pointer",
+          cursor: onSelect ? "pointer" : "default",
         }}
-        onClick={() => onSelect(rep.entry.id)}
+        onClick={onSelect ? () => onSelect(rep.entry.id) : undefined}
       >
         {/* Indent guide lines */}
         {parentLines.map((hasLine, i) => (
@@ -256,7 +259,7 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
   );
 }
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact, hideInlineButton, inlineDropdownWidth }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact, hideInlineButton, inlineDropdownWidth, locked = false }: Props) {
   const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openProp !== undefined ? openProp : openInternal;
@@ -293,6 +296,13 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
     if (onToggle) onToggle();
     else setOpenInternal(false);
   }, [onLeafChange, onToggle]);
+  const selectBranch = locked ? undefined : handleSelect;
+
+  const lockedNotice = locked && (
+    <div style={{ padding: "2px 0 4px", fontSize: 11, color: "var(--text-dim)", fontStyle: "italic" }}>
+      {t("i18n.branchesLockedWhileRunning")}
+    </div>
+  );
 
   const noBranchReason = !hasSession
     ? t("i18n.noActiveSession")
@@ -367,6 +377,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           }}>
             {hasContent ? (
               <div style={{ padding: "4px 8px 8px 8px", maxHeight: 260, overflowY: "auto" }}>
+                {lockedNotice}
                 {topLevel.map((child, idx) => (
                   <TreeNodeView
                     key={child.entry.id}
@@ -375,7 +386,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
                     depth={0}
                     isLast={idx === topLevel.length - 1}
                     parentLines={[]}
-                    onSelect={handleSelect}
+                    onSelect={selectBranch}
                   />
                 ))}
               </div>
@@ -428,6 +439,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
         }}>
           {hasContent ? (
             <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
+              {lockedNotice}
               {topLevel.map((child, idx) => (
                 <TreeNodeView
                   key={child.entry.id}
@@ -436,7 +448,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
                   depth={0}
                   isLast={idx === topLevel.length - 1}
                   parentLines={[]}
-                  onSelect={handleSelect}
+                  onSelect={selectBranch}
                 />
               ))}
             </div>

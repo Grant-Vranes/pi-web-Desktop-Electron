@@ -94,12 +94,15 @@ npm run desktop:dist
 
 | 参数 / 环境变量 | 作用 | 默认值 |
 | --- | --- | --- |
-| `--port <port>`、`-p` 或 `PORT` | 服务器端口 | `30141` |
-| `--hostname <host>`、`-H` 或 `PI_WEB_HOSTNAME` | 绑定地址 | `127.0.0.1` |
+| `--help`、`-h` | 打印启动选项并退出 | — |
+| `--port <port>`、`-p <port>` 或 `PORT` | 服务器端口 | `30141` |
+| `--hostname <host>`、`-H <host>` 或 `PI_WEB_HOSTNAME` | 绑定地址 | `127.0.0.1` |
 | `--no-open` 或 `PI_WEB_NO_OPEN=1` | 不自动打开浏览器 | 自动打开 |
+| `PI_WEB_SKIP_VERSION_CHECK=1` | 禁用 Pi Web 更新检查 | 未设置 |
+| `PI_WEB_ALLOWED_HOSTS` | 额外允许的精确代理或自定义主机名，逗号分隔 | 未设置 |
 | `PI_WEB_PASSWORD` | 启用浏览器密码登录；API 客户端可用用户名 `pi` 的 Basic Auth | 不启用认证 |
-| `PI_WEB_IDLE_TIMEOUT_MS` | 会话空闲超时（毫秒），`0` 表示不超时 | `600000`（10 分钟） |
-| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | 服务端请求走环境变量代理 | 未设置 |
+| `PI_WEB_IDLE_TIMEOUT_MS` | 会话空闲超时（毫秒），最大 `2147483647`；`0` 表示不超时；无效或超出范围的值使用默认值 | `600000`（10 分钟） |
+| `PI_WEB_SHUTDOWN_DEADLINE_MS` | 扩展处理 `session_shutdown` 的最长时间（毫秒），超过后会话无论如何都会被释放，最大 `2147483647`；`0`、无效或超出范围的值使用默认值 | `5000`（5 秒） |
 
 也可以复制 `.env.example` 为 `.env.local` 固定项目本地的端口等默认值；`npm run dev`、`npm run desktop:dev`、`npm run start` 都会读取它，CLI 参数与已导出的环境变量优先。
 
