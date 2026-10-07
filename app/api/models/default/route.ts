@@ -4,8 +4,7 @@ import { createAgentSessionServices, getAgentDir } from "@earendil-works/pi-codi
 import {
   isThinkingLevel,
   projectSettingsPath,
-  shadowingProjectKeys,
-  writeDefaultPreferences,
+  writeProjectDefaultPreferences,
   type DefaultPreferencesEdit,
 } from "@/lib/default-preferences";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
@@ -37,12 +36,13 @@ function parseEdit(body: DefaultPreferencesRequest): DefaultPreferencesEdit | nu
 }
 
 /**
- * Save the model and/or reasoning level new sessions start with.
+ * Save the model and/or reasoning level new sessions in this project start
+ * with. Per-project on purpose: the star writes `<cwd>/.pi/settings.json`,
+ * which pi merges over the global default, so each project keeps its own
+ * choice and other projects are untouched.
  *
- * Picking a model for one chat is session-scoped, as in the TUI; this is the
- * explicit "save as default" behind the selectors' star. The cwd decides which
- * project settings could shadow the global value and which models are in scope,
- * so it goes through the same allow-list as `/api/models`.
+ * The cwd decides which project settings file is written and which models
+ * are in scope, so it goes through the same allow-list as `/api/models`.
  */
 export async function PUT(req: Request) {
   let body: DefaultPreferencesRequest;
@@ -81,15 +81,13 @@ export async function PUT(req: Request) {
     });
     const { settingsManager } = services;
 
-    const shadowed = shadowingProjectKeys(settingsManager, edit);
-    if (shadowed.length > 0) {
-      const settingsPath = projectSettingsPath(cwd);
+    // An untrusted project's settings are ignored on load, so a default
+    // written there would silently never apply.
+    if (!settingsManager.isProjectTrusted()) {
       return Response.json({
-        error: `${settingsPath} sets ${shadowed.join(", ")} for this project, so a global default would not apply here.`,
-        reason: "project-scope",
-        settingsPath,
-        keys: shadowed,
-      }, { status: 409 });
+        error: `Project ${projectSettingsPath(cwd)} requires trust; trust this project before saving a default model for it.`,
+        reason: "project-untrusted",
+      }, { status: 403 });
     }
 
     if (edit.model) {
@@ -102,7 +100,7 @@ export async function PUT(req: Request) {
       }
     }
 
-    await writeDefaultPreferences(settingsManager, edit);
+    await writeProjectDefaultPreferences(cwd, edit);
     invalidateModelsCache();
     return Response.json({
       ok: true,

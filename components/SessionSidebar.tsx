@@ -3481,13 +3481,10 @@ function SessionItem({
                   <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
                 </svg>
               </button>
-              {/* Archive button — only on the active Conversations tab. Once a
-                  session is archived it lives in the Archive tab, where the
-                  group header's bulk unarchive handles restoration instead. */}
-              {!archivedView && (
-                <button
-                  onClick={toggleArchive}
-                  title={t("sidebar.archiveTitle")}
+              {/* Archive (active tab) / Unarchive (archive tab) button */}
+              <button
+                onClick={toggleArchive}
+                title={t(archivedView ? "sidebar.unarchiveTitle" : "sidebar.archiveTitle")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     width: 32, height: 32, padding: 0,
@@ -3509,12 +3506,20 @@ function SessionItem({
                   }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="21 8 21 21 3 21 3 8" />
-                    <rect x="1" y="3" width="22" height="5" rx="1" />
-                    <line x1="10" y1="12" x2="14" y2="12" />
+                    {archivedView ? (
+                      <>
+                        <polyline points="1 4 1 10 7 10" />
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                      </>
+                    ) : (
+                      <>
+                        <polyline points="21 8 21 21 3 21 3 8" />
+                        <rect x="1" y="3" width="22" height="5" rx="1" />
+                        <line x1="10" y1="12" x2="14" y2="12" />
+                      </>
+                    )}
                   </svg>
                 </button>
-              )}
               <button
                 onClick={handleDeleteClick}
                 title={t("sidebar.deleteWithShiftClick")}

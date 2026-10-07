@@ -2003,8 +2003,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [isNew, newSessionCwd, session?.cwd]);
 
   // Picking a model or reasoning level is session-scoped, as in the TUI. The
-  // selectors' star is the explicit Ctrl+S equivalent: it saves the global
-  // default new sessions start with and also selects it for this chat.
+  // selectors' star is the explicit Ctrl+S equivalent, saved per project: it
+  // writes this project's `.pi/settings.json`, so new sessions in this
+  // project start with it while other projects keep their own default.
   const saveDefaultPreferences = useCallback(async (
     edit: { provider: string; modelId: string } | { thinkingLevel: ConcreteThinkingLevel },
   ) => {
