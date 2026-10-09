@@ -83,26 +83,17 @@ test("the control a move came from takes focus in the bar of the new composer", 
   assert.match(source, /const from = initialFocusRef\.current;\s*if \(!from\) return;\s*initialFocusRef\.current = null;\s*onInitialFocusDoneRef\.current\(\);\s*const picker = pickerRef\.current;\s*focusIfLost\(document, \(from === "worktree" \? picker\?\.button\("worktree"\) : null\) \?\? picker\?\.button\("project"\) \?\? null\);/);
 });
 
-test("the bar sits in the empty page's header row, after the brand, only while it is empty", () => {
+test("the bar sits in the empty page's header row, only while it is empty", () => {
   const start = chatWindowSource.indexOf("{isEmptyNew && (\n          <div className=\"new-session-hero\"");
   assert.ok(start > 0);
   const hero = chatWindowSource.slice(start, chatWindowSource.indexOf("{chatInputElement}", start));
-  // The versions first (floated right of the first line), then the brand and the bar.
+  // The fork keeps no brand/versions row: the hero holds only the bar.
   assert.match(
     hero,
-    /^\{isEmptyNew && \(\s*<div className="new-session-hero" style=\{\{ paddingLeft: 16, paddingRight: isMobile \? 16 : 52 \}\}>\s*<div className="new-session-hero-row" style=\{\{ maxWidth: "var\(--chat-content-max-width, 820px\)" \}\}>\s*<div className="new-session-versions">[\s\S]*?<\/div>\s*<div className="new-session-brand" style=\{\{ gap: isMobile \? 7 : 10 \}\}>\s*<Image src="\/icons\/apple-touch-icon\.png"[\s\S]*?<\/div>\s*\{newSessionContextBar\}\s*<\/div>\s*<\/div>\s*\)\}\s*$/,
+    /^\{isEmptyNew && \(\s*<div className="new-session-hero" style=\{\{ paddingLeft: 16, paddingRight: isMobile \? 16 : 52 \}\}>\s*<div className="new-session-hero-row" style=\{\{ maxWidth: "var\(--chat-content-max-width, 820px\)" \}\}>\s*\{newSessionContextBar\}\s*<\/div>\s*<\/div>\s*\)\}\s*$/,
   );
   // The composer follows the header; nothing renders the bar elsewhere.
   assert.equal((chatWindowSource.match(/newSessionContextBar\}/g) ?? []).length, 1);
-});
-
-test("the update check runs once per page, so a later header has the link in its first paint", () => {
-  assert.match(chatWindowSource, /let appUpdateCheck: Promise<AppUpdateResponse \| null> \| null = null;\s*let appUpdateFound: AppUpdateResponse \| null = null;/);
-  assert.match(chatWindowSource, /appUpdateCheck \?\?= fetch\("\/api\/app-update"\)/);
-  // A failure is forgotten: a later header asks again.
-  assert.match(chatWindowSource, /\.catch\(\(\) => \{[^}]*appUpdateCheck = null;\s*return null;/);
-  assert.match(chatWindowSource, /useState<AppUpdateResponse \| null>\(\(\) => appUpdateFound\);/);
-  assert.match(chatWindowSource, /if \(appUpdateFound\) return;\s*let cancelled = false;/);
 });
 
 test("client code stays parseable by Safari 16.2 and its CSS flat", () => {
