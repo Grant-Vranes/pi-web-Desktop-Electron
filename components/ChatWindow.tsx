@@ -31,6 +31,7 @@ import { useProjectAliases } from "@/hooks/useProjectAliases";
 import { projectDisplayName } from "@/lib/project-alias";
 import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import type { AppUpdateResponse } from "@/lib/api-types";
 import type { ToolEntry } from "@/lib/tool-presets";
 import type { WorktreeState } from "@/lib/worktree-types";
 import type { SettingsSection } from "@/lib/settings-navigation";
@@ -99,6 +100,89 @@ interface Props {
 }
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 16;
+
+// One update check per page. Every fresh composer mounts the header again
+// (each move of the new-session bar does), and a link that turned up late
+// each time could push the bar onto a line of its own under the composer's
+// eyes; from the second header on it is there in the first paint.
+let appUpdateCheck: Promise<AppUpdateResponse | null> | null = null;
+let appUpdateFound: AppUpdateResponse | null = null;
+
+function checkAppUpdate(): Promise<AppUpdateResponse | null> {
+  appUpdateCheck ??= fetch("/api/app-update")
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const result = await response.json() as AppUpdateResponse;
+      return result.updateAvailable && result.latestVersion && result.releaseUrl ? result : null;
+    })
+    .then((result) => {
+      appUpdateFound = result;
+      return result;
+    })
+    .catch(() => {
+      // Update checks are best-effort and must not interrupt a new session;
+      // a later header asks again.
+      appUpdateCheck = null;
+      return null;
+    });
+  return appUpdateCheck;
+}
+
+function NewSessionUpdateLink({
+  label,
+}: {
+  label: (version: string) => string;
+}) {
+  const [update, setUpdate] = useState<AppUpdateResponse | null>(() => appUpdateFound);
+
+  useEffect(() => {
+    if (appUpdateFound) return;
+    let cancelled = false;
+    void checkAppUpdate().then((result) => {
+      if (!cancelled && result) setUpdate(result);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!update) return null;
+  const accessibleLabel = label(update.latestVersion);
+
+  return (
+    <a
+      href={update.releaseUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={accessibleLabel}
+      aria-label={accessibleLabel}
+      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        alignSelf: "center",
+        gap: 3,
+        minHeight: 32,
+        minWidth: 0,
+        padding: "0 4px",
+        background: "transparent",
+        borderRadius: 5,
+        color: "var(--accent)",
+        fontSize: 12,
+        fontWeight: 600,
+        lineHeight: 1.2,
+        textDecoration: "none",
+        transition: "background 0.12s",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>v{update.latestVersion}</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <path d="M7 17 17 7" />
+        <path d="M7 7h10v10" />
+      </svg>
+    </a>
+  );
+}
 
 function hasFinalAssistantAnswer(message: AgentMessage): boolean {
   if (message.role !== "assistant") return false;
@@ -1517,6 +1601,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {isEmptyNew && (
           <div className="new-session-hero" style={{ paddingLeft: 16, paddingRight: isMobile ? 16 : 52 }}>
             <div className="new-session-hero-row" style={{ maxWidth: "var(--chat-content-max-width, 820px)" }}>
+              <div className="new-session-versions">
+                <span>web <span className="new-session-version">v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span></span>
+                <span>pi <span className="new-session-version">v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span></span>
+              </div>
+              <div className="new-session-brand" style={{ gap: isMobile ? 7 : 10 }}>
+                <Image src="/icons/apple-touch-icon.png" width={32} height={32} alt="" priority style={{ flexShrink: 0 }} />
+                <span className="new-session-brand-name">Pi Web</span>
+                <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
+              </div>
               {newSessionContextBar}
             </div>
           </div>
