@@ -83,17 +83,17 @@ test("the control a move came from takes focus in the bar of the new composer", 
   assert.match(source, /const from = initialFocusRef\.current;\s*if \(!from\) return;\s*initialFocusRef\.current = null;\s*onInitialFocusDoneRef\.current\(\);\s*const picker = pickerRef\.current;\s*focusIfLost\(document, \(from === "worktree" \? picker\?\.button\("worktree"\) : null\) \?\? picker\?\.button\("project"\) \?\? null\);/);
 });
 
-test("the bar sits in the empty page's header row, after the brand, only while it is empty", () => {
+test("the empty page's header row keeps the brand and versions, without the bar", () => {
   const start = chatWindowSource.indexOf("{isEmptyNew && (\n          <div className=\"new-session-hero\"");
   assert.ok(start > 0);
   const hero = chatWindowSource.slice(start, chatWindowSource.indexOf("{chatInputElement}", start));
-  // The versions first (floated right of the first line), then the brand and the bar.
-  assert.match(
-    hero,
-    /^\{isEmptyNew && \(\s*<div className="new-session-hero" style=\{\{ paddingLeft: 16, paddingRight: isMobile \? 16 : 52 \}\}>\s*<div className="new-session-hero-row" style=\{\{ maxWidth: "var\(--chat-content-max-width, 820px\)" \}\}>\s*<div className="new-session-versions">[\s\S]*?<\/div>\s*<div className="new-session-brand" style=\{\{ gap: isMobile \? 7 : 10 \}\}>\s*<Image src="\/icons\/apple-touch-icon\.png"[\s\S]*?<\/div>\s*\{newSessionContextBar\}\s*<\/div>\s*<\/div>\s*\)\}\s*$/,
-  );
-  // The composer follows the header; nothing renders the bar elsewhere.
-  assert.equal((chatWindowSource.match(/newSessionContextBar\}/g) ?? []).length, 1);
+  // The fork's new session starts from the sidebar's rail: the hero shows
+  // only the brand and the versions, with no project/worktree picker.
+  assert.match(hero, /new-session-versions/);
+  assert.match(hero, /new-session-brand/);
+  // The composer follows the header; the bar renders nowhere.
+  assert.doesNotMatch(hero, /newSessionContextBar/);
+  assert.doesNotMatch(chatWindowSource, /newSessionContextBar/);
 });
 
 test("the update check runs once per page, so a later header has the link in its first paint", () => {

@@ -4,9 +4,8 @@ import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, typ
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useChatFontScale, CHAT_FONT_SCALE_STEP, CHAT_FONT_SCALE_MIN } from "@/hooks/useChatFontScale";
-import { SessionSidebar, type SelectSessionOptions, type SessionSidebarControl } from "./SessionSidebar";
+import { SessionSidebar, type SelectSessionOptions } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
-import { NewSessionContextBar, type NewSessionContextControl } from "./NewSessionContextBar";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
@@ -49,12 +48,7 @@ import { clearTabOpenSession, getTabOpen, setTabOpenNewSession, setTabOpenSessio
 import { mergeCatalogRow } from "./session-catalog-helpers";
 import { getDraft, rekeyDraft } from "@/lib/draft-store";
 import {
-  contextForCwd,
-  type NewSessionContext,
-  type NewSessionMove,
   type NewSessionOptions,
-  type NewSessionTarget,
-  type ProjectChoice,
 } from "@/lib/new-session-context";
 import {
   clearLastOpen,
@@ -232,21 +226,6 @@ export function AppShell() {
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
   const activeNewSessionDraftKeyRef = useRef<string | null>(null);
-  // The bar above a fresh composer (NewSessionContextBar): the sidebar reports
-  // what it shows and carries out its moves, which remount the composer. Its
-  // model and reasoning picks, as it last reported them, go along with the
-  // draft to the composer that replaces it, which takes them once.
-  const sidebarControlRef = useRef<SessionSidebarControl | null>(null);
-  const [sidebarNewSessionContext, setSidebarNewSessionContext] = useState<NewSessionContext | null>(null);
-  // The bar's last move until the sidebar reports that cwd (a commit later),
-  // so the bar of the new composer shows the target's project, and a worktree
-  // it just created, from its first frame.
-  const newSessionMoveRef = useRef<NewSessionMove | null>(null);
-  const handleSidebarNewSessionContext = useCallback((context: NewSessionContext | null) => {
-    if (context && context.cwd === newSessionMoveRef.current?.cwd) newSessionMoveRef.current = null;
-    setSidebarNewSessionContext(context);
-  }, []);
-  const newSessionBarFocusRef = useRef<NewSessionContextControl | null>(null);
   const newSessionChoicesRef = useRef<NewSessionChoices | null>(null);
   const [carriedNewSessionChoices, setCarriedNewSessionChoices] = useState<NewSessionChoices | null>(null);
   const handleNewSessionChoicesChange = useCallback((choices: NewSessionChoices) => {
@@ -1419,51 +1398,6 @@ export function AppShell() {
   // The bar above a fresh composer. Only a fresh composer moves, and only
   // somewhere else: the folder in use would remount it for nothing. The
   // control the move came from takes focus in the bar of the new composer.
-  const handlePickNewSessionContext = useCallback((target: NewSessionTarget, from: NewSessionContextControl) => {
-    if (selectedSession !== null || !effectiveNewSessionCwd || target.cwd === effectiveNewSessionCwd) return;
-    newSessionBarFocusRef.current = from;
-    // A worktree just created already left its move, with the branch.
-    if (target.projectKey && target.projectRoot && newSessionMoveRef.current?.cwd !== target.cwd) {
-      newSessionMoveRef.current = { cwd: target.cwd, project: { key: target.projectKey, root: target.projectRoot }, branch: null };
-    }
-    sidebarControlRef.current?.startNewSessionIn({ ...target, carryComposer: true });
-  }, [effectiveNewSessionCwd, selectedSession]);
-  // The folder picker answers later: its pick runs the newest closure, guard included.
-  const pickNewSessionContextRef = useRef(handlePickNewSessionContext);
-  pickNewSessionContextRef.current = handlePickNewSessionContext;
-  const handleOpenFolderForNewSession = useCallback((opener: HTMLElement | null) => {
-    sidebarControlRef.current?.openFolderForNewSession((target) => pickNewSessionContextRef.current(target, "project"), opener);
-  }, []);
-  const handleDefaultDirectoryForNewSession = useCallback(() => {
-    sidebarControlRef.current?.openDefaultDirectoryForNewSession((target) => pickNewSessionContextRef.current(target, "project"));
-  }, []);
-  const handleRefreshNewSessionWorktrees = useCallback(() => {
-    sidebarControlRef.current?.refreshWorktrees();
-  }, []);
-  const handleCreateNewSessionWorktree = useCallback(async (project: ProjectChoice, branch: string) => {
-    const control = sidebarControlRef.current;
-    if (!control) throw new Error("The session sidebar is not mounted");
-    const result = await control.createWorktree(project, branch);
-    // The bar moves there next, before any report lists it.
-    if ("path" in result) newSessionMoveRef.current = { cwd: result.path, project, branch };
-    return result;
-  }, []);
-  const handleNewSessionBarFocusDone = useCallback(() => {
-    newSessionBarFocusRef.current = null;
-  }, []);
-  const newSessionContextBar = selectedSession === null && effectiveNewSessionCwd ? (
-    <NewSessionContextBar
-      context={contextForCwd(sidebarNewSessionContext, effectiveNewSessionCwd, newSessionMoveRef.current)}
-      mobile={isMobile}
-      initialFocus={newSessionBarFocusRef.current}
-      onInitialFocusDone={handleNewSessionBarFocusDone}
-      onPick={handlePickNewSessionContext}
-      onUseDefaultDirectory={handleDefaultDirectoryForNewSession}
-      onOpenFolder={handleOpenFolderForNewSession}
-      onRefreshWorktrees={handleRefreshNewSessionWorktrees}
-      onCreateWorktree={handleCreateNewSessionWorktree}
-    />
-  ) : null;
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
@@ -1554,8 +1488,6 @@ export function AppShell() {
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
-        controlRef={sidebarControlRef}
-        onNewSessionContextChange={handleSidebarNewSessionContext}
         initialSessionId={initialSessionId}
         skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
         onInitialRestoreDone={handleInitialRestoreDone}
@@ -2810,7 +2742,6 @@ export function AppShell() {
               sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
               newSessionCwd={effectiveNewSessionCwd}
               newSessionDraftKey={newSessionDraftKey}
-              newSessionContextBar={newSessionContextBar}
               initialNewSessionChoices={selectedSession === null ? carriedNewSessionChoices : null}
               onNewSessionChoicesChange={handleNewSessionChoicesChange}
               onAgentEnd={handleAgentEnd}
