@@ -5,10 +5,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from "react-dom";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines } from "@/lib/ansi";
+import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/extension-dialog-fit";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, hasAssistantAnswer, isAssistantTruncated, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
+import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } from "@/lib/file-upload-client";
 import { MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
@@ -17,7 +19,7 @@ import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
 import { phaseLabel } from "@/lib/chat-phase-label";
-import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
+import { useAgentSession, type AgentEndInfo, type NewSessionChoices, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import type { DropPayload } from "@/lib/dropped-paths";
 import { buildAtMentionText } from "@/lib/file-fuzzy";
@@ -57,7 +59,12 @@ interface Props {
   sessionRunning?: boolean;
   newSessionCwd: string | null;
   newSessionDraftKey: string | null;
-  onAgentEnd?: () => void;
+  /** Shown above the composer while a fresh composer is still empty: where its session starts. */
+  newSessionContextBar?: ReactNode;
+  /** A fresh composer's model and reasoning picks, carried from the composer it replaces. */
+  initialNewSessionChoices?: NewSessionChoices | null;
+  onNewSessionChoicesChange?: (choices: NewSessionChoices) => void;
+  onAgentEnd?: (end: AgentEndInfo) => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
   onSessionForked?: (newSessionId: string) => void;
@@ -73,6 +80,8 @@ interface Props {
   onOpenSettings?: (section: SettingsSection) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string, page?: number) => void;
+  /** Files dropped onto the chat were written into the working directory. */
+  onFilesUploaded?: () => void;
   onOpenSession?: (sessionId: string) => void;
   /** Called when the user switches/creates/removes a worktree from the chat
    *  input bar — AppShell forwards it to handleCwdChange so the chat remounts
@@ -92,29 +101,47 @@ interface Props {
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 16;
 
+// One update check per page. Every fresh composer mounts the header again
+// (each move of the new-session bar does), and a link that turned up late
+// each time could push the bar onto a line of its own under the composer's
+// eyes; from the second header on it is there in the first paint.
+let appUpdateCheck: Promise<AppUpdateResponse | null> | null = null;
+let appUpdateFound: AppUpdateResponse | null = null;
+
+function checkAppUpdate(): Promise<AppUpdateResponse | null> {
+  appUpdateCheck ??= fetch("/api/app-update")
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const result = await response.json() as AppUpdateResponse;
+      return result.updateAvailable && result.latestVersion && result.releaseUrl ? result : null;
+    })
+    .then((result) => {
+      appUpdateFound = result;
+      return result;
+    })
+    .catch(() => {
+      // Update checks are best-effort and must not interrupt a new session;
+      // a later header asks again.
+      appUpdateCheck = null;
+      return null;
+    });
+  return appUpdateCheck;
+}
+
 function NewSessionUpdateLink({
   label,
 }: {
   label: (version: string) => string;
 }) {
-  const [update, setUpdate] = useState<AppUpdateResponse | null>(null);
+  const [update, setUpdate] = useState<AppUpdateResponse | null>(() => appUpdateFound);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/app-update", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return response.json() as Promise<AppUpdateResponse>;
-      })
-      .then((result) => {
-        if (result?.updateAvailable && result.latestVersion && result.releaseUrl) {
-          setUpdate(result);
-        }
-      })
-      .catch(() => {
-        // Update checks are best-effort and must not interrupt a new session.
-      });
-    return () => controller.abort();
+    if (appUpdateFound) return;
+    let cancelled = false;
+    void checkAppUpdate().then((result) => {
+      if (!cancelled && result) setUpdate(result);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   if (!update) return null;
@@ -244,7 +271,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onOpenSession, onCwdChange, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSession, onCwdChange, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
@@ -258,11 +285,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
   const extensionDialogShownRef = useRef(false);
-  const wrappedOnAgentEnd = useCallback(() => {
-    if (completionNotificationsEnabled && soundEnabledRef.current) {
+  const wrappedOnAgentEnd = useCallback((end: AgentEndInfo) => {
+    // A run someone stopped did not finish anything.
+    if (completionNotificationsEnabled && soundEnabledRef.current && !end.aborted) {
       playDoneSoundRef.current();
     }
-    onAgentEnd?.();
+    onAgentEnd?.(end);
   }, [completionNotificationsEnabled, onAgentEnd]);
 
   const initialScrollPositionRef = useRef(searchTarget ? null : initialScrollPosition ?? null);
@@ -296,7 +324,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, scrollUserMsgToTop,
     loadContext, ensureEntryLoaded, activeLeafId, scrollToBottom, scrollToMessage,
   } = useAgentSession({
-    session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
+    session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
     onOpenSettings,
     deferInitialScroll: Boolean(pendingScrollRestore),
@@ -867,13 +895,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       if (uploaded.length > 0) {
         const mentions = uploaded.map((path) => buildAtMentionText(path, false)).join("");
         chatInputRef?.current?.insertText(mentions);
+        onFilesUploaded?.();
       } else {
         addNotice({ type: "warning", message: "No files were imported from the dropped folder" });
       }
     } catch (error) {
       addNotice({ type: "warning", message: error instanceof Error ? error.message : "Import failed" });
     }
-  }, [activeCwd, addNotice, chatInputRef, session?.cwd]);
+  }, [activeCwd, addNotice, chatInputRef, onFilesUploaded, session?.cwd]);
 
   const onDrop = useCallback(({ imageFiles, pathMentions, hasNonImageFiles, internalPaths, hasUnresolvedDirectory }: DropPayload, dataTransfer: DataTransfer) => {
     if (imageFiles.length > 0) chatInputRef?.current?.addImages(imageFiles);
@@ -1565,27 +1594,33 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </button>
           </div>
         )}
+        {/* The brand, the project/worktree bar and the versions: one row, or
+            the bar on a line of its own under the brand where it does not
+            fit beside it (.new-session-hero in app/globals.css). The
+            versions come first: floated right of the first line. */}
         {isEmptyNew && (
-          <div className="mx-auto mb-3 w-full" style={{ maxWidth: "var(--chat-content-max-width, 820px)", paddingLeft: 32, paddingRight: isMobile ? 32 : 68 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontFamily: "var(--font-mono)" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 28, fontWeight: 700, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-                <span style={{ fontSize: 22, color: "var(--text)", fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={newChatProjectName ?? undefined}>{newChatProjectName ?? "Pi Web"}</span>
+          <div className="new-session-hero" style={{ paddingLeft: 16, paddingRight: isMobile ? 16 : 52 }}>
+            <div className="new-session-hero-row" style={{ maxWidth: "var(--chat-content-max-width, 820px)" }}>
+              <div className="new-session-versions">
+                <span>web <span className="new-session-version">v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span></span>
+                <span>pi <span className="new-session-version">v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span></span>
+              </div>
+              <div className="new-session-brand" style={{ gap: isMobile ? 7 : 10 }}>
+                <Image src="/icons/apple-touch-icon.png" width={32} height={32} alt="" priority style={{ flexShrink: 0 }} />
+                <span className="new-session-brand-name">Pi Web</span>
                 <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  web <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  pi <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-                </span>
-              </div>
+              {newSessionContextBar}
             </div>
           </div>
         )}
         {chatInputElement}
-        <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
+        <ExtensionStatusBar
+          statuses={extensionStatuses}
+          widgets={extensionWidgets}
+          onCommand={handleSend}
+          commandsDisabled={sessionBusy}
+        />
       </div>
       {isEmptyNew && <div className="min-h-0 flex-1" />}
     </div>
@@ -1714,6 +1749,17 @@ function ExtensionWaitingCount({ count }: { count: number }) {
   );
 }
 
+/** Corner brackets pointing outward; when expanded they point inward (restore). */
+function ExtensionSizeIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {expanded
+        ? <path d="M3.5 1v2.5H1M6.5 1v2.5H9M6.5 9v-2.5H9M3.5 9v-2.5H1" />
+        : <path d="M1 3.5V1h2.5M6.5 1H9v2.5M9 6.5V9H6.5M3.5 9H1V6.5" />}
+    </svg>
+  );
+}
+
 function ExtensionDialog({
   request,
   waitingCount,
@@ -1727,12 +1773,49 @@ function ExtensionDialog({
   const { t } = useI18n();
   const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
   const [collapsed, setCollapsed] = useState(false);
+  // Dialogs open at the historical width and grow only when their own content cannot
+  // fit (a code block or table that would scroll sideways), so no extension has to ask
+  // for room. The maximize button is the user's own override for this dialog (#947).
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [fitWidth, setFitWidth] = useState<number | null>(null);
+  const [full, setFull] = useState(false);
+  const toggleFull = useCallback(() => setFull((prev) => !prev), []);
   const [now, setNow] = useState(() => Date.now());
   const focusFirstOption = useCallback((element: HTMLDivElement | null) => element?.focus(), []);
   const summary = getExtensionDialogSummary(request);
   const remainingSeconds = request.expiresAt === undefined
     ? null
     : Math.max(0, Math.ceil((request.expiresAt - now) / 1000));
+
+  useLayoutEffect(() => {
+    if (collapsed) return;
+    const dialog = dialogRef.current;
+    const body = bodyRef.current;
+    if (!dialog || !body) return;
+    let disposed = false;
+    const fit = () => {
+      if (disposed) return;
+      const blocks = body.querySelectorAll<HTMLElement>("pre, .markdown-table-wrap");
+      if (blocks.length === 0) return;
+      const needed = fitExtensionDialogWidth(
+        dialog.offsetWidth,
+        Array.from(blocks, (block) => block.scrollWidth - block.clientWidth),
+      );
+      // Only ever grow: shrinking again would make the dialog jump while it is read.
+      if (needed !== null) setFitWidth((prev) => (prev !== null && prev >= needed ? prev : needed));
+    };
+    fit();
+    // Highlighted code replaces its plain fallback after the first paint, and a web
+    // font can change glyph widths once it arrives.
+    const mutations = new MutationObserver(fit);
+    mutations.observe(body, { childList: true, subtree: true, characterData: true });
+    void document.fonts?.ready.then(fit);
+    return () => {
+      disposed = true;
+      mutations.disconnect();
+    };
+  }, [collapsed]);
 
   useEffect(() => {
     if (request.expiresAt === undefined) return;
@@ -1815,12 +1898,15 @@ function ExtensionDialog({
         </button>
       ) : (
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label={request.title}
         style={{
           pointerEvents: "auto",
-          width: "min(560px, 100%)",
-          maxHeight: "min(760px, 100%)",
+          // "Full" fills the content region above the composer: the overlay is inset:0 with
+          // 20px padding, so 100% keeps that breathing room without covering the input.
+          width: full ? "100%" : `min(${fitWidth ?? EXTENSION_DIALOG_BASE_WIDTH}px, 100%)`,
+          maxHeight: full ? "100%" : "min(760px, 100%)",
           display: "flex",
           flexDirection: "column",
           border: "1px solid var(--border)",
@@ -1841,6 +1927,26 @@ function ExtensionDialog({
               {countdown}
             </div>
           </div>
+          <button
+            type="button"
+            onClick={toggleFull}
+            title={full ? t("chat.extensionRestoreSize") : t("chat.extensionMaximize")}
+            aria-label={full ? t("chat.extensionRestoreSize") : t("chat.extensionMaximize")}
+            style={{
+              display: "grid",
+              placeItems: "center",
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <ExtensionSizeIcon expanded={full} />
+          </button>
           <button
             type="button"
             onClick={() => setCollapsed(true)}
@@ -1867,6 +1973,7 @@ function ExtensionDialog({
         </div>
 
         <div
+          ref={bodyRef}
           style={{
             padding: 14,
             flex: "1 1 auto", minHeight: 0, overflowY: "auto",
@@ -2110,7 +2217,11 @@ function ExtensionCustomPanel({
         style={{
           pointerEvents: "auto",
           position: "relative",
-          width: "min(920px, 100%)",
+          // The extension already wrapped its lines to the width it asked for; show them
+          // whole when that is wider than the usual 920px instead of scrolling sideways.
+          width: "max-content",
+          minWidth: "min(920px, 100%)",
+          maxWidth: "100%",
           maxHeight: "min(760px, 100%)",
           display: "flex",
           flexDirection: "column",

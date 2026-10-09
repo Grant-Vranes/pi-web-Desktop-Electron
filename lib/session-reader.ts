@@ -14,7 +14,7 @@ import { readArchivedSessionIds } from "./archived-sessions";
 import { MAX_TOOL_RESULT_IMAGE_BYTES, TOOL_RESULT_IMAGE_MIMES } from "./tool-result-images";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
-import { listSessionsIncremental, type ScannedSessionInfo } from "./session-list-scanner";
+import { listSessionsIncremental, scanSessionFileInfo, type ScannedSessionInfo } from "./session-list-scanner";
 
 export { getAgentDir };
 
@@ -246,6 +246,17 @@ async function buildSessionList(scanned: ScannedSessionInfo[]): Promise<SessionI
     ? sessions.map((session) => (archivedIds.has(session.id) ? { ...session, archived: true } : session))
     : sessions;
   return attachSessionProjectInfo(stamped);
+}
+
+/**
+ * One session's catalogue row, read the way listAllSessions() reads it
+ * (project info, `modified` as the last message time), so the row a caller
+ * shows at once is not moved by the next list refresh. Only the file itself
+ * is scanned: a fork's `originSessionId` is the caller's to add.
+ */
+export async function readSessionInfo(filePath: string): Promise<SessionInfo | null> {
+  const scanned = await scanSessionFileInfo(filePath);
+  return scanned ? (await buildSessionList([scanned]))[0] ?? null : null;
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {

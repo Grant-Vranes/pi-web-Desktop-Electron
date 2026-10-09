@@ -25,6 +25,7 @@ declare global {
   interface Window {
     piDesktop?: {
       getPathForFile(file: File): string;
+      selectDirectory?: () => Promise<string | null>;
     };
   }
 }

@@ -4,6 +4,8 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./settings.css";
+import "./sidebar.css";
+import "./sidebar-menu.css";
 
 // Noto Sans Mono is self-hosted (see @font-face in app/globals.css) so the
 // build no longer needs to fetch from Google Fonts.

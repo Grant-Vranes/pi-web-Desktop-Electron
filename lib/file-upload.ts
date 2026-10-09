@@ -160,16 +160,17 @@ export function writeUploadFiles(
       continue;
     }
 
-    // Replaceable file conflict: unlink before write (overwrite only).
-    // Directories and symbolic links are never unlinked; an in-place write
-    // will fail safely without deleting the existing target.
+    // Replaceable file conflict: atomic replace (overwrite only).
+    // Directories and symbolic links are never replaced; the helper throws
+    // safely without deleting the existing target.
     if (isConflict && !isNonReplaceable) {
       try {
-        fs.unlinkSync(destination);
+        replaceUploadFile(destination, file.bytes);
+        uploaded.push(file.name);
       } catch (error) {
         errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
-        continue;
       }
+      continue;
     }
 
     try {
@@ -181,4 +182,28 @@ export function writeUploadFiles(
   }
 
   return { uploaded, skipped, errors };
+}
+
+/** Keep the old entry intact until its complete replacement can be renamed over it. */
+export function replaceUploadFile(destination: string, bytes: Buffer): void {
+  const stat = fs.lstatSync(destination);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("Cannot replace a directory or symbolic link");
+  }
+
+  // A private directory beside the destination keeps the rename on the same
+  // filesystem and gives us ownership of the staging file, even on write failure.
+  const stagingDirectory = fs.mkdtempSync(path.join(path.dirname(destination), ".pi-upload-"));
+  const stagingFile = path.join(stagingDirectory, "upload");
+  try {
+    fs.writeFileSync(stagingFile, bytes, { flag: "wx", mode: stat.mode & 0o777 });
+    // The destination may have changed since the multipart upload was inspected.
+    const current = fs.lstatSync(destination);
+    if (!current.isFile() || current.isSymbolicLink()) {
+      throw new Error("Cannot replace a directory or symbolic link");
+    }
+    fs.renameSync(stagingFile, destination);
+  } finally {
+    fs.rmSync(stagingDirectory, { recursive: true, force: true });
+  }
 }

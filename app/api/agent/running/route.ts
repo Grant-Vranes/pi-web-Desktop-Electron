@@ -5,10 +5,13 @@ import {
   getRunningRpcSessionDetails,
   getRunningRpcSessionIds,
 } from "@/lib/rpc-manager";
+import { getSessionUiStateRevision } from "@/lib/session-ui-state";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/agent/running - Lightweight snapshot for visible-tab polling.
+// sessionUiStateRevision (null when unreadable) tells the sidebar its pins and
+// archive changed elsewhere; it costs one stat while the file is unchanged.
 export async function GET() {
   return NextResponse.json(
     {
@@ -18,6 +21,7 @@ export async function GET() {
       // indicator tooltips. Cheap to compute — read from in-memory wrappers.
       runningSessionDetails: getRunningRpcSessionDetails(),
       completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
+      sessionUiStateRevision: getSessionUiStateRevision(),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

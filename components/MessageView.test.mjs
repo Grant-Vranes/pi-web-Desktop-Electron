@@ -11,6 +11,7 @@ const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const {
   MessageView,
   ThinkingBlock,
+  formatToolDuration,
   getModelDisplayName,
   getTokenEstimateText,
   getToolCallInputText,
@@ -18,6 +19,7 @@ const {
 } = await jiti.import("./MessageView.tsx");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { splitFinalAssistantBlocks } = await jiti.import("@/lib/message-display");
+const { clearExpandedToolCalls, setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
 
 function renderMessage(message, props = {}) {
   return renderToStaticMarkup(
@@ -128,6 +130,50 @@ test("keeps streamed tool input out of collapsed markup while counting it", () =
   assert.equal(getTokenEstimateText(block), block.rawInput);
 });
 
+test("renders write tool content as readable file text", () => {
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-write-file",
+    toolName: "write",
+    input: { path: "src/example.ts", content: "first line\nsecond line\n" },
+  };
+  clearExpandedToolCalls();
+  setToolCallExpanded(block.toolCallId, true);
+  try {
+    const html = renderMessage({
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude-test",
+      content: [block],
+    });
+
+    assert.ok(html.includes("src/example.ts"));
+    assert.match(html, /first line\nsecond line\n/);
+    assert.doesNotMatch(html, /"content":/);
+  } finally {
+    clearExpandedToolCalls();
+  }
+});
+
+test("keeps the input JSON for a write with another argument, an empty file or streamed input", () => {
+  const cases = [
+    { id: "call-write-mode", input: { path: "notes.md", content: "text", mode: "append" } },
+    { id: "call-write-empty", input: { path: "empty.txt", content: "" } },
+    { id: "call-write-streaming", input: {}, rawInput: "{\"path\":\"a.ts\",\"content\":\"one\\ntwo" },
+  ];
+  for (const { id, input, rawInput } of cases) {
+    const block = { type: "toolCall", toolCallId: id, toolName: "write", input, ...(rawInput === undefined ? {} : { rawInput }) };
+    clearExpandedToolCalls();
+    setToolCallExpanded(id, true);
+    try {
+      const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
+      assert.equal(textOf(html).includes(getToolCallInputText(block)), true, id);
+    } finally {
+      clearExpandedToolCalls();
+    }
+  }
+});
+
 test("renders subagents as standard tool calls with only an extra session button", () => {
   const block = {
     type: "toolCall",
@@ -180,6 +226,23 @@ test("renders subagents as standard tool calls with only an extra session button
     onOpenSession() {},
   });
   assert.doesNotMatch(ordinaryHtml, /Open sub-agent session/);
+});
+
+test("a tool card shows the run time pi recorded, else the timestamps' difference, never a tiny one", () => {
+  const block = { type: "toolCall", toolCallId: "call-duration-1", toolName: "bash", arguments: { command: "make" } };
+  const message = { role: "assistant", provider: "anthropic", model: "claude-test", content: [block], timestamp: 1_000_000, durationMs: 4_000 };
+  const header = (result) => renderMessage(message, { toolResults: new Map([[block.toolCallId, result]]) });
+  const result = { role: "toolResult", toolCallId: block.toolCallId, toolName: "bash", content: [], isError: false };
+  // pi 1.1 records the execution itself; the timestamps would count the model's 4 s of generation too.
+  assert.match(header({ ...result, timestamp: 1_006_400, durationMs: 2_400 }), />2\.4s</);
+  // A result saved before pi recorded durations falls back to the timestamps.
+  assert.match(header({ ...result, timestamp: 1_006_400 }), />6\.4s</);
+  assert.doesNotMatch(header({ ...result, timestamp: 1_006_400, durationMs: 40 }), />\d+\.\ds</);
+
+  assert.equal(formatToolDuration(400), "0.4s");
+  assert.equal(formatToolDuration(59_940), "59.9s");
+  assert.equal(formatToolDuration(185_000), "3m 5s");
+  assert.equal(formatToolDuration(3_725_000), "1h 2m 5s");
 });
 
 const COMPLETE_SKILL_EXPANSION = `<skill name="review" location="/skills/review/SKILL.md">
@@ -482,8 +545,6 @@ test("uses the unanswered truncation notice for an empty length reply", () => {
   assert.match(html, /nearly full context/i);
   assert.doesNotMatch(html, /follow-up/i);
 });
-
-const { setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
 
 function textOf(html) {
   return html.replace(/<[^>]+>/g, "").replace(/&quot;/g, "\"").replace(/&amp;/g, "&").replace(/&#x27;/g, "'");

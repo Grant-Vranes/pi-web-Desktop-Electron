@@ -49,8 +49,9 @@ test("keeps the session event stream open through the idle grace window", () => 
   assert.doesNotMatch(agentEndSource, /closeEvents\(\)/);
   assert.match(agentStartSource, /cancelEventStreamGrace\(\)/);
   assert.match(agentSettledSource, /scheduleEventStreamClose\(sid\)/);
-  assert.match(agentSettledSource, /onAgentEnd\?\.\(\)/);
-  assert.match(promptDoneSource, /notifyPromptStage\(runId\)/);
+  // A stopped run ends quietly: the event says so (pi 1.1's agent_settled.aborted, carried on prompt_done).
+  assert.match(agentSettledSource, /onAgentEnd\?\.\(\{ aborted: event\.aborted === true \}\)/);
+  assert.match(promptDoneSource, /notifyPromptStage\(runId, event\.aborted === true\)/);
   assert.match(promptDoneSource, /scheduleEventStreamClose\(sid\)/);
   assert.match(sendSource, /const definitivelyRejected = !promptRequestStarted/);
   assert.match(sendSource, /if \(!definitivelyRejected && sentSessionId\) \{[\s\S]*?waitForPromptSettlement/);
@@ -145,6 +146,19 @@ test("fresh sessions use the preference while persisted and live sessions restor
   assert.match(changeSource, /result\?\.recreated[\s\S]*?maintainEventsConnected\(activeSessionId\)/);
   assert.match(changeSource, /sessionIdRef\.current = activeSessionId/);
   assert.doesNotMatch(loadToolsSource, /setPreferredToolPreset/);
+});
+
+test("a fresh composer starts from carried model picks and reports its own", () => {
+  assert.match(source, /const initialChoices = isNew \? opts\.initialNewSessionChoices \?\? null : null;/);
+  assert.match(source, /useState<SelectedModel \| null>\(\(\) => initialChoices\?\.model \?\? null\)/);
+  assert.match(source, /useState<ConcreteThinkingLevel \| null>\(\(\) => initialChoices\?\.thinkingLevel \?\? null\)/);
+  // What ensureNewSession sends is the same carried pick, not just what the selector shows.
+  assert.match(source, /const newSessionModelOverrideRef = useRef<SelectedModel \| null>\(initialChoices\?\.model \?\? null\);/);
+  assert.match(source, /const thinkingLevelOverrideRef = useRef<ConcreteThinkingLevel \| null>\(initialChoices\?\.thinkingLevel \?\? null\);/);
+  assert.match(source, /useEffect\(\(\) => \{\s*if \(isNew\) onNewSessionChoicesChange\?\.\(\{ model: newSessionModel, thinkingLevel: newSessionThinkingLevel \}\);\s*\}, \[isNew, newSessionModel, newSessionThinkingLevel, onNewSessionChoicesChange\]\);/);
+  assert.match(chatWindowSource, /newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd,/);
+  // The tool preset needs no carrying: every fresh composer starts from the stored pick.
+  assert.match(source, /setToolPresetState\(getPreferredToolPreset\(\)\)/);
 });
 
 test("sessions the user never overrode follow pi's configured defaultTools (#700)", () => {

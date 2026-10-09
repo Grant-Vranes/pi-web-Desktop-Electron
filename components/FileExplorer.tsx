@@ -13,13 +13,18 @@ import {
 } from "@/lib/file-paths";
 import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
 import type { FileIndexEntry } from "@/lib/file-fuzzy";
+import { uploadFiles, type UploadConflictStrategy, type UploadError, type UploadResponse } from "@/lib/file-upload-client";
 import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
+import type { FileTreeHiddenReason } from "@/lib/file-tree-visibility";
 import { useI18n } from "@/hooks/useI18n";
 import { collectDroppedUploadEntries, type DroppedUploadEntry } from "@/lib/drop-collect";
 import { openInFileBrowser } from "@/lib/file-browser";
 import { canOpenInHorseMD, openInHorseMD } from "@/lib/horsemd";
 import type { FileTabMutation } from "./file-tab-state";
 type Translate = ReturnType<typeof useI18n>["t"];
+
+/** Why a listed entry is normally left out; only listings with `hidden=1` report it. */
+type HiddenReason = Exclude<FileTreeHiddenReason, "always">;
 
 interface FileEntry {
   name: string;
@@ -30,6 +35,7 @@ interface FileEntry {
   outsideLinkTarget?: string;
   /** That target contains the project or the home folder. */
   outsideLinkEncloses?: boolean;
+  hidden?: HiddenReason;
 }
 
 interface FileNode {
@@ -41,6 +47,7 @@ interface FileNode {
   loaded?: boolean;
   outsideLinkTarget?: string;
   outsideLinkEncloses?: boolean;
+  hidden?: HiddenReason;
 }
 
 interface Props {
@@ -55,6 +62,8 @@ interface Props {
   fileSearchOpen?: boolean;
   onFileSearchOpenChange?: (open: boolean) => void;
   onFileMutation?: (mutation: FileTabMutation) => void;
+  /** Also list what Git ignores, dimmed (the explorer bar's switch). */
+  showHidden?: boolean;
 }
 
 export interface FileExplorerHandle {
@@ -62,21 +71,6 @@ export interface FileExplorerHandle {
 }
 
 type UploadPhase = "idle" | "checking" | "uploading";
-type UploadConflictStrategy = "error" | "overwrite" | "skip";
-
-interface UploadError {
-  name: string;
-  error: string;
-}
-
-interface UploadResponse {
-  uploaded?: string[];
-  skipped?: string[];
-  errors?: UploadError[];
-  conflicts?: string[];
-  nonReplaceable?: string[];
-  error?: string;
-}
 
 interface UploadSummary {
   uploaded: string[];
@@ -186,9 +180,9 @@ async function responseError(res: Response, fallback: string): Promise<Error> {
   return new Error(message);
 }
 
-async function fetchEntries(dirPath: string): Promise<FileNode[]> {
+async function fetchEntries(dirPath: string, showHidden = false): Promise<FileNode[]> {
   const encoded = encodeFilePathForApi(dirPath);
-  const res = await fetch(`/api/files/${encoded}?type=list`);
+  const res = await fetch(`/api/files/${encoded}?type=list${showHidden ? "&hidden=1" : ""}`);
   if (!res.ok) throw await responseError(res, "Failed to load files");
   const data = await res.json() as { entries?: FileEntry[] };
   return (data.entries ?? []).map((e) => ({
@@ -200,6 +194,7 @@ async function fetchEntries(dirPath: string): Promise<FileNode[]> {
     loaded: !e.isDir,
     outsideLinkTarget: e.outsideLinkTarget,
     outsideLinkEncloses: e.outsideLinkEncloses,
+    hidden: e.hidden,
   }));
 }
 
@@ -437,6 +432,14 @@ function MenuItemButton({ icon, label, danger = false, disabled = false, onClick
   );
 }
 
+// Listed only while the explorer shows ignored files: dimmed like VS Code's
+// ignored entries, the reason in the name's tooltip.
+const HIDDEN_ENTRY_OPACITY = 0.55;
+const HIDDEN_REASON_KEYS = {
+  ignored: "files.hiddenIgnored",
+  excluded: "files.hiddenExcluded",
+} as const satisfies Record<HiddenReason, string>;
+
 export function TreeNode({
   node,
   depth,
@@ -449,6 +452,8 @@ export function TreeNode({
   highlightedPaths,
   gitStatusByPath,
   changedDirectoryPaths,
+  showHidden = false,
+  parentHidden,
   t,
   onFolderDrop,
   onContextMenu,
@@ -468,6 +473,9 @@ export function TreeNode({
   highlightedPaths: Set<string>;
   gitStatusByPath: Map<string, GitFileStatus>;
   changedDirectoryPaths: Set<string>;
+  showHidden?: boolean;
+  /** Set inside a hidden directory: Git has no answer there, so its entries inherit the reason. */
+  parentHidden?: HiddenReason;
   t: Translate;
   onFolderDrop?: (dirPath: string, event: React.DragEvent) => void;
   onContextMenu?: (node: FileNode, event: React.MouseEvent) => void;
@@ -477,6 +485,7 @@ export function TreeNode({
   onSelect?: (path: string) => void;
 }) {
   const open = expandedPaths.has(node.fullPath);
+  const hidden = node.hidden ?? parentHidden;
   const highlighted = highlightedPaths.has(node.fullPath);
   const selected = selectedPath != null && sameFilePath(selectedPath, node.fullPath);
   const isCut = cutPath !== null && cutPath !== undefined && sameFilePath(cutPath, node.fullPath);
@@ -513,7 +522,7 @@ export function TreeNode({
     setLoading(true);
     setLoadError(null);
     try {
-      const entries = await fetchEntries(node.fullPath);
+      const entries = await fetchEntries(node.fullPath, showHidden);
       setChildren(entries);
       setLoaded(true);
     } catch (error) {
@@ -521,7 +530,26 @@ export function TreeNode({
     } finally {
       setLoading(false);
     }
-  }, [loaded, node.fullPath]);
+  }, [loaded, node.fullPath, showHidden]);
+
+  // The switch changes what every listing holds: reload an open directory now
+  // and a collapsed one when it next opens.
+  const listedShowHiddenRef = useRef(showHidden);
+  useEffect(() => {
+    if (listedShowHiddenRef.current === showHidden) return;
+    listedShowHiddenRef.current = showHidden;
+    if (!loaded) return;
+    if (open && !pendingLinkTarget) loadChildren(true);
+    else setLoaded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showHidden]);
+
+  // A hidden directory left expanded mounts open again when the switch comes
+  // back on, before anything listed it.
+  useEffect(() => {
+    if (node.isDir && open && !loaded && !pendingLinkTarget) loadChildren();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Re-fetch children when the tree refreshes and the directory is open.
   useEffect(() => {
@@ -640,19 +668,21 @@ export function TreeNode({
           </svg>
         )}
         {!node.isDir && <span style={{ width: 10, flexShrink: 0 }} />}
-        <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+        <span style={{ flexShrink: 0, display: "flex", alignItems: "center", opacity: hidden ? HIDDEN_ENTRY_OPACITY : 1 }}>
           {node.isDir ? <FolderIcon size={14} open={open} /> : getFileIcon(node.name, 14)}
         </span>
         <span
+          data-hidden-reason={hidden}
           style={{
             fontSize: 12,
-            color: "var(--text)",
+            color: hidden ? "var(--text-muted)" : "var(--text)",
+            opacity: hidden ? HIDDEN_ENTRY_OPACITY : 1,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             flex: 1,
           }}
-          title={node.fullPath}
+          title={hidden ? `${node.fullPath}\n${t(HIDDEN_REASON_KEYS[hidden])}` : node.fullPath}
         >
           {node.name}
         </span>
@@ -903,6 +933,8 @@ export function TreeNode({
               highlightedPaths={highlightedPaths}
               gitStatusByPath={gitStatusByPath}
               changedDirectoryPaths={changedDirectoryPaths}
+              showHidden={showHidden}
+              parentHidden={hidden}
               t={t}
               onFolderDrop={onFolderDrop}
               onContextMenu={onContextMenu}
@@ -1087,6 +1119,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   fileSearchOpen = false,
   onFileSearchOpenChange,
   onFileMutation,
+  showHidden = false,
 }, ref) {
   const { t } = useI18n();
   const [roots, setRoots] = useState<FileNode[]>([]);
@@ -1529,12 +1562,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setLoading(cwdChanged);
     setError(null);
     let cancelled = false;
-    fetchEntries(cwd)
+    fetchEntries(cwd, showHidden)
       .then((entries) => { if (!cancelled) setRoots(entries); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [cwd, refreshKey, treeRefreshKey]);
+  }, [cwd, refreshKey, treeRefreshKey, showHidden]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1787,19 +1820,20 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       )}
 
       {fileSearchOpen && (
-      <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+      <div style={{ padding: "2px 8px 6px" }}>
         <div style={{ position: "relative" }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}>
             <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
           </svg>
           <input
             ref={searchInputRef}
+            id="file-search-input"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Escape") onFileSearchOpenChange?.(false); }}
             placeholder={t("sidebar.searchFilesPlaceholder")}
             aria-label={t("sidebar.searchFiles")}
-            style={{ width: "100%", boxSizing: "border-box", padding: "6px 24px", border: "1px solid var(--border)", borderRadius: 5, outline: "none", background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11 }}
+            style={{ width: "100%", boxSizing: "border-box", padding: "6px 24px", border: "1px solid var(--border)", borderRadius: 8, outline: "none", background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11 }}
           />
           {searchQuery && (
             <button
@@ -1908,6 +1942,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 highlightedPaths={highlightedPaths}
                 gitStatusByPath={gitStatusByPath}
                 changedDirectoryPaths={changedDirectoryPaths}
+                showHidden={showHidden}
                 t={t}
                 onFolderDrop={handleFolderDrop}
                 onContextMenu={openContextMenu}
