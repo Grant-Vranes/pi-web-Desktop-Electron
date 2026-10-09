@@ -1604,7 +1604,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               </div>
               <div className="new-session-brand" style={{ gap: isMobile ? 7 : 10 }}>
                 <Image src="/icons/apple-touch-icon.png" width={32} height={32} alt="" priority style={{ flexShrink: 0 }} />
-                <span className="new-session-brand-name">Pi Web</span>
+                <span className="new-session-brand-name" title={newChatProjectName ?? undefined}>{newChatProjectName ?? "Pi Web"}</span>
                 <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
               </div>
             </div>
