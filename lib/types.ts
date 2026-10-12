@@ -413,6 +413,8 @@ export interface SessionContext {
   /** Every turn anchor on the active branch, oldest first — including entries
    *  beyond the paged `messages` window, so the minimap can show all turns. */
   turnAnchors?: TurnAnchor[];
+  /** Turns on the branch before `oldestEntryId`, not loaded (the minimap numbers from it). */
+  turnsBefore: number;
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
 }

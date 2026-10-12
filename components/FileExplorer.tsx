@@ -16,6 +16,7 @@ import type { FileIndexEntry } from "@/lib/file-fuzzy";
 import { uploadFiles, type UploadConflictStrategy, type UploadError, type UploadResponse } from "@/lib/file-upload-client";
 import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
 import type { FileTreeHiddenReason } from "@/lib/file-tree-visibility";
+import { createExpandedPathsMemory } from "@/lib/file-tree-expansion";
 import { useI18n } from "@/hooks/useI18n";
 import { collectDroppedUploadEntries, type DroppedUploadEntry } from "@/lib/drop-collect";
 import { openInFileBrowser } from "@/lib/file-browser";
@@ -71,6 +72,10 @@ export interface FileExplorerHandle {
 }
 
 type UploadPhase = "idle" | "checking" | "uploading";
+
+// Each folder's open directories for the page's life, so moving to another
+// project and back (a session picked in another group) does not fold the tree.
+const expandedPathsByCwd = createExpandedPathsMemory();
 
 interface UploadSummary {
   uploaded: string[];
@@ -1142,6 +1147,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [searchExpanded, setSearchExpanded] = useState<Set<string>>(new Set());
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevCwdRef = useRef<string | null>(null);
+  const expandedPathsRef = useRef(expandedPaths);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [isDropTarget, setIsDropTarget] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ target: FileNode; x: number; y: number; isRoot: boolean } | null>(null);
@@ -1533,16 +1539,31 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   useEffect(() => () => onUploadBusyChange?.(false), [onUploadBusyChange]);
 
+  // Declared before the cwd effect, so that one saves the set the user last saw.
   useEffect(() => {
-    const cwdChanged = prevCwdRef.current !== cwd;
+    expandedPathsRef.current = expandedPaths;
+  }, [expandedPaths]);
+
+  // An explorer that unmounts (its cwd gone, then back) saves its folder's set too, so it comes back open.
+  useEffect(() => () => {
+    if (prevCwdRef.current !== null) expandedPathsByCwd.save(prevCwdRef.current, expandedPathsRef.current);
+  }, []);
+
+  useEffect(() => {
+    const previousCwd = prevCwdRef.current;
+    const cwdChanged = previousCwd !== cwd;
     prevCwdRef.current = cwd;
 
-    // Reset expanded state only when cwd changes, not on refreshKey bumps.
-    // Restore the persisted expansion state for this cwd so switching between
-    // projects keeps each project's folder expansion as the user left it.
+    // Swap the open directories only when cwd changes, not on refreshKey bumps.
+    // The roots unmount while the new cwd loads, so each restored directory
+    // mounts open and lists itself; one that is gone is never listed to look.
+    // Expansion state is persisted per cwd in localStorage (survives reloads);
+    // the in-memory map is the fallback for a cwd never written to storage.
     if (cwdChanged) {
-      const restored = readStoredExpandedPaths(cwd);
-      setExpandedPaths(restored ?? new Set());
+      if (previousCwd !== null) expandedPathsByCwd.save(previousCwd, expandedPathsRef.current);
+      const restored = readStoredExpandedPaths(cwd) ?? expandedPathsByCwd.restore(cwd);
+      expandedPathsRef.current = restored;
+      setExpandedPaths(restored);
       setHighlightedPaths(new Set());
       setUploadSummary(null);
       setPendingConflict(null);
@@ -1568,6 +1589,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [cwd, refreshKey, treeRefreshKey, showHidden]);
+
+  // Files changed outside pi-web (an editor, a terminal) show up once the
+  // window is back in front (#1144).
+  useEffect(() => {
+    const refresh = () => setTreeRefreshKey((key) => key + 1);
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

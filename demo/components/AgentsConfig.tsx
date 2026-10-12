@@ -49,6 +49,7 @@ const EMPTY_PROFILE: EditableProfile = {
   tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
   loadSkills: false,
   loadExtensions: false,
+  codemode: "off",
   promptMode: "append",
   inheritContext: false,
   runInBackground: false,
@@ -83,6 +84,7 @@ function editableProfile(profile: SubagentProfile): EditableProfile {
     tools: [...profile.tools],
     loadSkills: profile.loadSkills,
     loadExtensions: profile.loadExtensions,
+    codemode: profile.codemode ?? "off",
     promptMode: profile.promptMode,
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.thinking ? { thinking: profile.thinking } : {}),
@@ -91,6 +93,17 @@ function editableProfile(profile: SubagentProfile): EditableProfile {
     runInBackground: profile.runInBackground,
     enabled: profile.enabled,
   };
+}
+
+/**
+ * The model a profile reference names. It may end in pi's `:<thinking level>` (`provider/model:high`),
+ * which the runtime reads as the model plus its level; a listed id that contains a colon matches whole.
+ */
+function profileModelBase(reference: string, isListed: (reference: string) => boolean): string {
+  if (isListed(reference)) return reference;
+  const colon = reference.lastIndexOf(":");
+  const level = reference.slice(colon + 1);
+  return colon > 0 && level && (THINKING_OPTIONS as readonly string[]).includes(level) ? reference.slice(0, colon) : reference;
 }
 
 function profileKey(profile: Pick<SubagentProfile, "scope" | "name">): string {
@@ -362,13 +375,15 @@ export function AgentsConfig({
       ? displayProfilePath(selected, cwd) ?? t("agents.builtinPath")
       : "";
   const fullPath = creating ? displayedPath : selected?.filePath ?? displayedPath;
-  const selectedModelAvailable = !draft.model || modelOptions.some((model) => `${model.provider}/${model.id}` === draft.model);
+  const isListedModel = (reference: string) => modelOptions.some((model) => `${model.provider}/${model.id}` === reference);
+  const draftModelBase = draft.model && profileModelBase(draft.model, isListedModel);
+  const selectedModelAvailable = !draftModelBase || isListedModel(draftModelBase);
   const selectedModel = (() => {
-    if (!draft.model) return null;
-    const separator = draft.model.indexOf("/");
+    if (!draftModelBase) return null;
+    const separator = draftModelBase.indexOf("/");
     return separator < 0
-      ? { provider: "", modelId: draft.model }
-      : { provider: draft.model.slice(0, separator), modelId: draft.model.slice(separator + 1) };
+      ? { provider: "", modelId: draftModelBase }
+      : { provider: draftModelBase.slice(0, separator), modelId: draftModelBase.slice(separator + 1) };
   })();
   const controlStyle = disabled ? { ...inputStyle, ...disabledInputStyle } : inputStyle;
   const switchDisabled = creating
@@ -609,6 +624,25 @@ export function AgentsConfig({
                     </div>
                   </Field>
 
+                  <Field label={t("agents.codemode")}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <select
+                        aria-label={t("agents.codemode")}
+                        value={draft.codemode ?? "off"}
+                        disabled={disabled}
+                        onChange={(event) => update("codemode", event.target.value as EditableProfile["codemode"])}
+                        style={{ ...controlStyle, width: "auto", minWidth: 180, alignSelf: "flex-start" }}
+                      >
+                        <option value="inherit">{t("agents.codemode.inherit")}</option>
+                        <option value="on">{t("agents.codemode.on")}</option>
+                        <option value="off">{t("agents.codemode.off")}</option>
+                      </select>
+                      <span style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.4 }}>
+                        {t("agents.codemodeHint")}
+                      </span>
+                    </div>
+                  </Field>
+
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.5fr) minmax(120px, 0.75fr) minmax(100px, 0.5fr)", gap: 12 }}>
                     <Field label={t("agents.model")}>
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -618,7 +652,9 @@ export function AgentsConfig({
                           onChange={(provider, modelId) => update("model", `${provider}/${modelId}`)}
                           onClear={() => update("model", undefined)}
                           emptyLabel={modelsLoading ? t("agents.modelsLoading") : t("agents.inherit")}
-                          selectedLabel={draft.model && !selectedModelAvailable ? t("agents.modelUnavailable", { model: draft.model }) : undefined}
+                          selectedLabel={draft.model && !selectedModelAvailable
+                            ? t("agents.modelUnavailable", { model: draft.model })
+                            : draft.model !== draftModelBase ? draft.model : undefined}
                           disabled={disabled || modelsLoading || (modelOptions.length === 0 && !draft.model)}
                           ariaLabel={t("agents.model")}
                           variant="field"

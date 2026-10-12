@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ComponentProps, type MouseEvent } from "react";
+import { createContext, memo, useContext, useMemo, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
-import { markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { markdownAppUrlTransform, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { splitMarkdownBlocks } from "@/lib/markdown-blocks";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
 
@@ -44,8 +45,36 @@ function MarkdownImage({
   );
 }
 
-export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, keepLineBreaks }: MarkdownBodyProps) {
+interface MarkdownBlockProps {
+  markdown: string;
+  remarkPlugins: typeof markdownRemarkPlugins;
+  urlTransform: typeof markdownUrlTransform;
+  components: Components;
+}
+
+/** One parse; skipped while its text and renderers stay the same. */
+const MarkdownBlock = memo(function MarkdownBlock({ markdown, remarkPlugins, urlTransform, components }: MarkdownBlockProps) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
+      urlTransform={urlTransform}
+      components={components}
+    >
+      {markdown}
+    </ReactMarkdown>
+  );
+});
+
+export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, keepLineBreaks }: MarkdownBodyProps) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
+  // A streaming reply grows by a few characters per chunk; parsing all of it
+  // each time made a long reply quadratic. Its finished blocks keep their
+  // parse and only the last is parsed again. A finished message is one block.
+  const blocks = useMemo(
+    () => (isStreaming ? splitMarkdownBlocks(normalizedMarkdown) : [normalizedMarkdown]),
+    [isStreaming, normalizedMarkdown],
+  );
   // Stable renderer identities keep stateful blocks mounted across message hover updates.
   const components = useMemo<Components>(() => ({
     code({ className, children, ...props }) {
@@ -110,6 +139,13 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
     img(props) {
       return <MarkdownImage cwd={cwd} {...props} />;
     },
+    ol({ node, start, style, ...props }) {
+      // An outside marker wider than the list's left padding is clipped by
+      // .markdown-body's overflow-x, so the padding follows the largest number.
+      const items = node?.children.filter((child) => child.type === "element" && child.tagName === "li").length ?? 0;
+      const digits = String(Math.abs((start ?? 1) + Math.max(items, 1) - 1)).length;
+      return <ol start={start} style={{ ...style, ["--ol-marker-digits" as string]: Math.max(digits, 2) }} {...props} />;
+    },
     table({ children }) {
       return (
         <div className="markdown-table-wrap">
@@ -121,14 +157,15 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
 
   return (
     <div className={["markdown-body", className].filter(Boolean).join(" ")}>
-      <ReactMarkdown
-        remarkPlugins={keepLineBreaks ? markdownUserRemarkPlugins : markdownRemarkPlugins}
-        rehypePlugins={markdownRehypePlugins}
-        urlTransform={onOpenFile ? markdownUrlTransform : undefined}
-        components={components}
-      >
-        {normalizedMarkdown}
-      </ReactMarkdown>
+      {blocks.map((block, index) => (
+        <MarkdownBlock
+          key={index}
+          markdown={block}
+          remarkPlugins={keepLineBreaks ? markdownUserRemarkPlugins : markdownRemarkPlugins}
+          urlTransform={onOpenFile ? markdownUrlTransform : markdownAppUrlTransform}
+          components={components}
+        />
+      ))}
     </div>
   );
-}
+});

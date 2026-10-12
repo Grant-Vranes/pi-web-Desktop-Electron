@@ -88,6 +88,18 @@ npm run desktop:dist
 >
 > `.build-tmp/` 已在 `.gitignore` 中。
 
+命令：
+
+```bash
+pi-web version          # 打印已安装的版本
+pi-web status           # 列出正在运行的服务
+pi-web stop [--port N]  # 停止正在运行的服务
+pi-web open [--port N]  # 在浏览器中打开正在运行的服务
+pi-web update [--check] # 更新全局 npm 安装
+```
+
+更新时先运行 `pi-web stop`，再运行 `pi-web update`（也可以再次执行同一条安装命令）。卸载时运行 `npm uninstall -g @agegr/pi-web`。
+
 ## 配置
 
 命令行参数优先于环境变量。`--no-open` 或 `PI_WEB_NO_OPEN=1` 可禁止自动打开浏览器；`pi-web --help` 打印启动选项。
@@ -98,6 +110,7 @@ npm run desktop:dist
 | `--port <port>`、`-p <port>` 或 `PORT` | 服务器端口 | `30141` |
 | `--hostname <host>`、`-H <host>` 或 `PI_WEB_HOSTNAME` | 绑定地址 | `127.0.0.1` |
 | `--no-open` 或 `PI_WEB_NO_OPEN=1` | 不自动打开浏览器 | 自动打开 |
+| `PI_WEB_APP_NAME` | PWA manifest 的 `name` 和 `short_name`；去除首尾空白，空值使用默认值 | `Pi Web` |
 | `PI_WEB_SKIP_VERSION_CHECK=1` | 禁用 Pi Web 更新检查 | 未设置 |
 | `PI_WEB_ALLOWED_HOSTS` | 额外允许的精确代理或自定义主机名，逗号分隔 | 未设置 |
 | `PI_WEB_PASSWORD` | 启用浏览器密码登录；API 客户端可用用户名 `pi` 的 Basic Auth | 不启用认证 |
@@ -105,6 +118,15 @@ npm run desktop:dist
 | `PI_WEB_SHUTDOWN_DEADLINE_MS` | 扩展处理 `session_shutdown` 的最长时间（毫秒），超过后会话无论如何都会被释放，最大 `2147483647`；`0`、无效或超出范围的值使用默认值 | `5000`（5 秒） |
 
 也可以复制 `.env.example` 为 `.env.local` 固定项目本地的端口等默认值；`npm run dev`、`npm run desktop:dev`、`npm run start` 都会读取它，CLI 参数与已导出的环境变量优先。
+
+在启动服务前设置 `PI_WEB_APP_NAME`，例如 `PI_WEB_APP_NAME='工作 Pi' pi-web`。修改后重启服务即可提供新的 manifest，无需重新构建。已安装 PWA 的名称更新由浏览器管理，不保证立即生效；此设置不改变页面标题或图标。
+
+例如：
+
+```bash
+pi-web --help
+pi-web -p 8080 -H 0.0.0.0 --no-open
+```
 
 代理也可在**应用内设置面板**配置（HTTP/HTTPS/SOCKS5、认证、NO_PROXY、连接测试），保存到 `~/.pi/agent/proxy.json` 后对所有服务端请求生效。
 
@@ -141,11 +163,12 @@ window.addEventListener("pi-web:session-row-contextmenu", (event) => {
 The detail object contains `id`, `path`, `cwd`, optional `name`, pointer
 coordinates, and a `refresh()` callback for actions that change the session
 list. If no listener cancels the extension event, Pi Web opens its built-in
-session menu (pin, rename, fork, mark read or unread, archive, delete) at the
-pointer instead of the browser's native context menu. The row's `⋯` button
-always opens the built-in menu and does not dispatch the event. Sessions not
-yet saved to disk get no built-in menu, so the native one still appears for
-them. This hook is browser-side and independent of Pi agent extensions.
+session menu (pin, rename, fork, mark read or unread, archive, open in new
+tab, delete) at the pointer instead of the browser's native context menu.
+The row's `⋯` button always opens the built-in menu and does not dispatch the
+event. Sessions not yet saved to disk get no built-in menu, so the native one
+still appears for them. This hook is browser-side and independent of Pi agent
+extensions.
 
 ### Extension Session Liveness
 

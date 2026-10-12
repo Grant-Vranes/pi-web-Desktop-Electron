@@ -20,6 +20,7 @@ import {
   deleteSessionViewSnapshot,
   getSessionViewSnapshot,
   setSessionViewSnapshot,
+  snapshotCoversLoadedEntries,
 } from "@/lib/session-view-cache";
 import { clearDraft, getDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
@@ -47,8 +48,7 @@ import {
   shouldShowScrollToLatest,
 } from "@/lib/chat-lazy-load";
 import {
-  INITIAL_STREAMING_STATE,
-  streamReducer,
+  createStreamingStore,
   type ClientAssistantMessageEvent,
 } from "@/lib/streaming-message";
 
@@ -69,6 +69,7 @@ export interface SessionData {
     oldestEntryId: string | null;
     hasMore: boolean;
     turnAnchors?: TurnAnchor[];
+    turnsBefore: number;
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
   };
@@ -179,6 +180,8 @@ export interface UseAgentSessionOptions {
   newSessionDraftKey: string | null;
   /** A run ended; `aborted` when it was stopped rather than finished (pi's `agent_settled.aborted`). */
   onAgentEnd?: (end: AgentEndInfo) => void;
+  /** A top-level tool call finished; the files it touched may have changed. */
+  onToolEnd?: (toolName: string) => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
   onSessionForked?: (newSessionId: string) => void;
@@ -339,7 +342,7 @@ type SlashCommandsResponse = {
 
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
-    session, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
+    session, newSessionCwd, newSessionDraftKey, onAgentEnd, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
     onOpenSettings,
   } = opts;
@@ -359,7 +362,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Mirror of the pagination window so callbacks can read it without re-creation.
   const historyWindowRef = useRef({ entryIds, historyCursor, hasEarlierMessages });
   historyWindowRef.current = { entryIds, historyCursor, hasEarlierMessages };
-  const [streamState, dispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
+  const [earlierTurnCount, setEarlierTurnCount] = useState(0);
+  // Outside React state: a streamed chunk must not re-render the whole chat (see StreamingStore).
+  const [streamingStore] = useState(createStreamingStore);
+  const dispatch = streamingStore.dispatch;
   const [agentRunning, setAgentRunning] = useState(false);
   const [bashRunning, setBashRunning] = useState(false);
   const [pendingBash, setPendingBash] = useState<{ command: string; excludeFromContext: boolean } | null>(null);
@@ -461,6 +467,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const activeLeafIdRef = useRef<string | null>(null);
   const historyCursorRef = useRef<string | null>(null);
   const hasEarlierMessagesRef = useRef(false);
+  const earlierTurnCountRef = useRef(0);
 
   sessionPropIdRef.current = session?.id ?? null;
   dataRef.current = data;
@@ -469,6 +476,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   activeLeafIdRef.current = activeLeafId;
   historyCursorRef.current = historyCursor;
   hasEarlierMessagesRef.current = hasEarlierMessages;
+  earlierTurnCountRef.current = earlierTurnCount;
 
   if (!eventConnectionRef.current) {
     eventConnectionRef.current = new AgentEventConnection({
@@ -654,6 +662,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setEntryIds([]);
           setHistoryCursor(null);
           setHasEarlierMessages(false);
+          setEarlierTurnCount(0);
           setError(null);
         }
         deleteSessionViewSnapshot(sid);
@@ -682,6 +691,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               entryIds: entryIdsRef.current,
               oldestEntryId: historyCursorRef.current,
               hasMore: hasEarlierMessagesRef.current,
+              turnsBefore: earlierTurnCountRef.current,
             },
           }
         : d);
@@ -697,6 +707,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           leafId: d.leafId,
           oldestEntryId: historyCursorRef.current,
           hasMore: hasEarlierMessagesRef.current,
+          turnsBefore: earlierTurnCountRef.current,
           summaryTree: d.tree,
           thinkingLevel: d.context.thinkingLevel,
           model: d.context.model,
@@ -709,6 +720,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setEntryIds(d.context.entryIds ?? []);
         setHistoryCursor(d.context.oldestEntryId);
         setHasEarlierMessages(d.context.hasMore);
+        setEarlierTurnCount(d.context.turnsBefore ?? 0);
       }
       // Tool-preset state is independent of the view cache: it must be applied
       // on every read, cached window or not (#700).
@@ -726,6 +738,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           leafId: d.leafId,
           oldestEntryId: d.context.oldestEntryId,
           hasMore: d.context.hasMore,
+          turnsBefore: d.context.turnsBefore ?? 0,
           summaryTree: d.tree,
           thinkingLevel: d.context.thinkingLevel,
           model: d.context.model,
@@ -800,6 +813,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (sessionIdRef.current !== sid || options?.signal?.aborted || !sessionHookMountedRef.current) return;
       setHistoryCursor(d.context.oldestEntryId);
       setHasEarlierMessages(d.context.hasMore);
+      setEarlierTurnCount(d.context.turnsBefore ?? 0);
       setData((prev) => {
         if (!prev || prev.sessionId !== sid) return prev;
         const context = before ? {
@@ -808,6 +822,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           entryIds: [...d.context.entryIds, ...prev.context.entryIds],
           oldestEntryId: d.context.oldestEntryId,
           hasMore: d.context.hasMore,
+          turnsBefore: d.context.turnsBefore,
         } : d.context;
         return { ...prev, context };
       });
@@ -906,7 +921,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             : {}),
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // The server's reason (a project folder that no longer exists, a model Chat only
+        // cannot load) beats a bare status.
+        const body = await res.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${res.status}`);
+      }
       const result = await res.json() as {
         sessionId: string;
         model?: SelectedModel | null;
@@ -1198,7 +1218,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setActiveToolResults(new Map());
     dispatch({ type: "end" });
     return wasRunning;
-  }, []);
+  }, [dispatch]);
 
   const notifyPromptStage = useCallback((runId: number, aborted = false) => {
     if (notifiedPromptRunIdRef.current === runId) return false;
@@ -1436,6 +1456,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setAgentRunning(true);
           setAgentPhase({ kind: "waiting_model" });
         }
+        // Opening the stream is what resumes an idle-reaped session, so the
+        // mount's state read may have found no runtime and no usage to show.
+        if (sessionIdRef.current) void refreshContextUsage(sessionIdRef.current);
         break;
       }
       case "agent_start":
@@ -1444,6 +1467,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         agentRunningRef.current = true;
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
+        // A retry's wait is over once its run starts, as pi's TUI shows it: the
+        // successful auto_retry_end comes only with the retry's first complete
+        // reply, which can stream for minutes.
+        setRetryInfo(null);
         dispatch({ type: "start" });
         break;
       case "agent_end":
@@ -1650,6 +1677,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "tool_execution_end": {
         if (isNestedToolExecutionEvent(event)) break;
         const id = event.toolCallId as string;
+        onToolEnd?.(event.toolName as string);
         setActiveToolResults((prev) => {
           if (!prev.has(id)) return prev;
           const next = new Map(prev);
@@ -1700,7 +1728,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setExtensionDialogs((queue) => removeExtensionUiRequest(queue, event.id as string));
         break;
     }
-  }, [addNotice, applyContextUsage, cancelEventStreamGrace, handleExtensionUiRequest, loadSession, notifyPromptStage, onAgentEnd, refreshContextUsage, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
+  }, [addNotice, applyContextUsage, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, notifyPromptStage, onAgentEnd, onToolEnd, refreshContextUsage, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -1775,7 +1803,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
           }
         }
-        await ensureEventsConnected(sid);
+        // Switching sessions unmounts this composer and closes its stream. The
+        // prompt still goes out, so the new session runs and gets its sidebar
+        // row instead of losing the submitted text (#1146).
+        if (sessionHookMountedRef.current) {
+          await ensureEventsConnected(sid).catch((error) => {
+            if (sessionHookMountedRef.current) throw error;
+          });
+        }
         promptRequestStarted = true;
         await sendAgentCommand(sid, {
           type: "prompt",
@@ -1831,7 +1866,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, editEntryId, setEdit]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, dispatch, reconcileAgentState, restoreSubmission, editEntryId, setEdit]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -2008,6 +2043,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setIsCompacting(false);
     }
   }, [isCompacting, loadSession]);
+
+  // The banner otherwise stays until the next compaction, e.g. "Nothing to compact".
+  const dismissCompactError = useCallback(() => setCompactError(null), []);
 
   const loadModels = useCallback(async (signal?: AbortSignal) => {
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
@@ -2518,6 +2556,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             entryIds: cached.entryIds,
             oldestEntryId: cached.oldestEntryId,
             hasMore: cached.hasMore,
+            turnsBefore: cached.turnsBefore,
             thinkingLevel: cached.thinkingLevel,
             model: cached.model,
           },
@@ -2528,6 +2567,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setEntryIds(cached.entryIds);
         setHistoryCursor(cached.oldestEntryId);
         setHasEarlierMessages(cached.hasMore);
+        setEarlierTurnCount(cached.turnsBefore);
         setError(null);
         setLoading(false);
       }
@@ -2579,7 +2619,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (sid && currentData && currentData.sessionId === sid && currentData.snapshotRevision) {
         const existing = getSessionViewSnapshot(sid);
         const entryIds = entryIdsRef.current;
-        const coverable = !existing || entryIds.every((id) => existing.entryIds.includes(id) || (existing.loadedEntryIds ?? []).includes(id));
+        const coverable = !existing || snapshotCoversLoadedEntries(existing, entryIds);
         if (coverable) {
           setSessionViewSnapshot({
             sessionId: sid,
@@ -2589,6 +2629,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             leafId: activeLeafIdRef.current,
             oldestEntryId: historyCursorRef.current,
             hasMore: hasEarlierMessagesRef.current,
+            turnsBefore: earlierTurnCountRef.current,
             summaryTree: currentData.tree,
             thinkingLevel: currentData.context.thinkingLevel,
             model: currentData.context.model,
@@ -2738,7 +2779,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
+    data, loading, error, activeLeafId, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
     agentRunning, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats, autoCompactionEnabled,
@@ -2759,6 +2800,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // Actions
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+    dismissCompactError,
     handleRecallQueue,
     handleBuiltinSlashCommand,
     handleEditContent,

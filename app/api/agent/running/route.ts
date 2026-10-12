@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionListVersion } from "@/lib/session-reader";
 import {
+  getAwaitingInputRpcSessionIds,
   getCompletionNotificationSuppressedRpcSessionIds,
   getRunningRpcSessionDetails,
   getRunningRpcSessionIds,
@@ -20,6 +21,7 @@ export async function GET() {
       // Per-session model/cwd/state for running sessions, used by project
       // indicator tooltips. Cheap to compute — read from in-memory wrappers.
       runningSessionDetails: getRunningRpcSessionDetails(),
+      awaitingInputSessionIds: getAwaitingInputRpcSessionIds(),
       completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
       sessionUiStateRevision: getSessionUiStateRevision(),
     },

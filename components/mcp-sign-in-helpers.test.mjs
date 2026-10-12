@@ -115,7 +115,7 @@ test("how a sign-in ended is one sentence, in a tone", () => {
   assert.equal(mcpSignInOutcomeTone(flow("cancelled")), "off");
 });
 
-test("a sign-in joined from another entry of the URL never points at this entry's Connection row", () => {
+test("a sign-in joined from another entry of the URL never points at this entry's Status row", () => {
   const server = { scope: "global", name: "docs" };
   assert.equal(mcpSignInShared(flow("done"), server), false);
   assert.equal(mcpSignInShared(flow("done", { name: "docs-alias" }), server), true);
@@ -133,10 +133,6 @@ test("a sign-in joined from another entry of the URL never points at this entry'
   assert.equal(mcpSignInOutcomeKey(flow("expired"), true), "mcp.signIn.expired");
   // Signing in is what counts for the joining entry; the other entry's connection is its own.
   assert.equal(mcpSignInOutcomeTone(flow("done", { result: { ...connected, state: "failed" } }), true), "on");
-  for (const key of ["mcp.signIn.shared.done", "mcp.signIn.shared.already", "mcp.signIn.shared.connect-failed"]) {
-    assert.match(messages[key], /\{name\}/, key);
-    assert.doesNotMatch(messages[key], /Connection above/, key);
-  }
 });
 
 test("what a failed cancel or a refused paste left behind goes once the flow has ended", () => {

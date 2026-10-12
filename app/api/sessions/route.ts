@@ -8,6 +8,7 @@ import {
   mergeSessionLists,
 } from "@/lib/session-reader";
 import {
+  getAwaitingInputRpcSessionIds,
   getCompletionNotificationSuppressedRpcSessionIds,
   getRpcSessionInfos,
   getRunningRpcSessionIds,
@@ -43,6 +44,7 @@ export async function GET(req: Request) {
         sessions,
         sessionListVersion,
         runningSessionIds: getRunningRpcSessionIds(),
+        awaitingInputSessionIds: getAwaitingInputRpcSessionIds(),
         completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
       },
       { headers: { "Cache-Control": "no-store" } },
@@ -52,6 +54,7 @@ export async function GET(req: Request) {
         sessions,
         sessionListVersion,
         runningSessionIds: getRunningRpcSessionIds(),
+        awaitingInputSessionIds: getAwaitingInputRpcSessionIds(),
         completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
       },
       { headers: { "Cache-Control": "no-store" } },

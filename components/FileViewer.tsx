@@ -2,11 +2,9 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent } from "react";
-import {
-  Prism as SyntaxHighlighter,
-  createElement as renderSyntaxNode,
-  type SyntaxHighlighterProps,
-} from "react-syntax-highlighter";
+import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
+import renderSyntaxNode from "react-syntax-highlighter/dist/esm/create-element";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -18,8 +16,10 @@ import { getEditorLanguage, getEditorHighlightStyle } from "@/lib/codemirror-lan
 import { diffLinesBetween, type ChangeKind } from "@/lib/diff-lines";
 import ReactMarkdown from "react-markdown";
 import { useTheme } from "@/hooks/useTheme";
+import { usePrismLanguages } from "@/hooks/usePrismLanguages";
 import {
   DOCX_PREVIEW_MAX_BYTES,
+  HTML_PREVIEW_MAX_BYTES,
   getFileExt,
   isAudioPath,
   isDocumentPreviewPath,
@@ -31,8 +31,10 @@ import {
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { parseFrontmatter } from "@/lib/frontmatter";
-import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
+import { isExternalMarkdownHref, markdownAppUrlTransform, markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
+import { DelimitedTable } from "./DelimitedTable";
+import { isDelimitedTablePath } from "@/lib/delimited-table";
 import { FrontmatterCard } from "./FrontmatterCard";
 import { parseUnifiedPatch } from "@/lib/patch";
 import { getFileApiUrl } from "@/lib/file-api";
@@ -1294,6 +1296,8 @@ function TextFileViewer({
   });
   const onStateChangeRef = useRef(onStateChange);
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
+  // Whole file for an HTML preview whose source view is still chunked.
+  const [htmlFull, setHtmlFull] = useState<{ text?: string; error?: string } | null>(null);
   const [editorText, setEditorText] = useState<string | null>(initialDraft);
   const [saveConflict, setSaveConflict] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1670,20 +1674,52 @@ function TextFileViewer({
     void fetchGitDiff(filePath);
   }, [fetchGitDiff, filePath, gitRefreshKey]);
 
+  const isDelimitedTable = isDelimitedTablePath(filePath);
+
   useEffect(() => {
     // HTML gets the same rendered-first treatment as markdown: a generated page
     // is usually more useful viewed than read as source. Both have a preview
     // mode already; the source tab stays one click away. A restored choice or
-    // explicit mode hint always wins over this default.
+    // explicit mode hint always wins over this default. A CSV/TSV file opens
+    // as its table, even while only its first chunk is loaded.
     if (
       defaultPreviewEligibleRef.current
-      && !data?.truncated
-      && (data?.language === "markdown" || data?.language === "html")
+      && data
+      && (
+        isDelimitedTable
+        || (data.language === "markdown" && !data.truncated)
+        || (data.language === "html" && (!data.truncated || data.size <= HTML_PREVIEW_MAX_BYTES))
+      )
     ) {
       defaultPreviewEligibleRef.current = false;
       updateDisplayMode("preview");
     }
-  }, [data?.language, data?.truncated, updateDisplayMode]);
+  }, [data, isDelimitedTable, updateDisplayMode]);
+
+  // Large HTML: the source view loads 256 KB chunks, but a half document cannot
+  // render, so the preview fetches the whole file once. A new `data` (watch
+  // change, reload) refetches it; the previous page stays up meanwhile, so a
+  // live change does not flash "Loading".
+  const needsHtmlFull = displayMode === "preview"
+    && data?.language === "html"
+    && data.truncated
+    && data.size <= HTML_PREVIEW_MAX_BYTES;
+  useEffect(() => {
+    if (!needsHtmlFull) {
+      setHtmlFull(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(getFileApiUrl(filePath, "download", sourceSessionId), { signal: controller.signal })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        setHtmlFull({ text: await r.text() });
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setHtmlFull({ error: String(e) });
+      });
+    return () => controller.abort();
+  }, [needsHtmlFull, data, filePath, sourceSessionId]);
 
   useEffect(() => {
     if (gitDiffResolved && !hasGitDiff && displayMode === "diff") updateDisplayMode("source");
@@ -1711,9 +1747,17 @@ function TextFileViewer({
   const viewerContent = data?.content ?? "";
   const sourceLines = useMemo(() => viewerContent.split("\n"), [viewerContent]);
   const language = data?.language ?? "text";
+  // Plain text needs no Prism languages; any other file loads them once.
+  const prismReady = usePrismLanguages(Boolean(data) && language !== "text");
   const isHtml = language === "html";
   const isMarkdown = language === "markdown";
-  const hasPreview = !data?.truncated && (isHtml || isMarkdown);
+  // A table shows a loaded prefix too, without its cut last record; an HTML
+  // preview fetches the whole file up to HTML_PREVIEW_MAX_BYTES.
+  const hasPreview = isDelimitedTable || (isHtml
+    ? !!data && (!data.truncated || data.size <= HTML_PREVIEW_MAX_BYTES)
+    : isMarkdown && !data?.truncated);
+  // A partly loaded HTML file previews whole, so Load more belongs to its source view.
+  const showLoadMore = !!data?.truncated && !(isHtml && effectiveDisplayMode === "preview");
   const useLightweightSource = sourceLines.length > SOURCE_HIGHLIGHT_MAX_LINES
     && !(effectiveDisplayMode === "diff" && hasGitDiff)
     && !(effectiveDisplayMode === "preview" && hasPreview);
@@ -1724,7 +1768,7 @@ function TextFileViewer({
     () => (
       <SyntaxHighlighter
         className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
-        language={language === "text" ? "plaintext" : language}
+        language={language === "text" || !prismReady ? "plaintext" : language}
         style={isDark ? fileViewerDarkTheme : vs}
         showLineNumbers
         lineNumberStyle={{
@@ -1756,7 +1800,7 @@ function TextFileViewer({
         {viewerContent}
       </SyntaxHighlighter>
     ),
-    [isDark, language, viewerContent, wrapLines],
+    [isDark, language, prismReady, viewerContent, wrapLines],
   );
   const lightweightSourceLines = useMemo(
     () => useLightweightSource ? sourceLines.map((line, lineIndex) => (
@@ -2403,7 +2447,7 @@ const lines = sourceLines;
           )}
         </div>
       )}
-      {data?.truncated && (
+      {showLoadMore && data?.truncated && (
         <div
           className="file-viewer-load-more"
           style={{
@@ -2441,7 +2485,7 @@ const lines = sourceLines;
           viewerStateRef.current.scrollTop = event.currentTarget.scrollTop;
           viewerStateRef.current.scrollLeft = event.currentTarget.scrollLeft;
         }}
-        style={{ flex: 1, overflow: "auto", background: "var(--bg)", paddingBottom: data?.truncated ? 48 : undefined }}
+        style={{ flex: 1, overflow: "auto", background: "var(--bg)", paddingBottom: showLoadMore ? 48 : undefined }}
       >
         {isEditing ? (
           <div className="file-editor" style={{ display: "flex", width: "100%", height: "100%", background: "var(--bg)" }}>
@@ -2460,9 +2504,13 @@ const lines = sourceLines;
           </div>
         ) : effectiveDisplayMode === "diff" && hasGitDiff ? (
           <DiffView patch={gitDiff.patch!} />
+        ) : isHtml && effectiveDisplayMode === "preview" && data?.truncated && !htmlFull?.text ? (
+          <div style={{ padding: 24, color: "var(--text-dim)", fontSize: 12 }}>
+            {htmlFull?.error ?? t("i18n.loading")}
+          </div>
         ) : isHtml && effectiveDisplayMode === "preview" ? (
           <iframe
-            srcDoc={content}
+            srcDoc={data?.truncated ? htmlFull?.text : content}
             sandbox="allow-scripts"
             style={{ width: "100%", height: "100%", border: "none", background: "var(--bg)" }}
              title={t("i18n.htmlPreview")}
@@ -2476,7 +2524,7 @@ const lines = sourceLines;
             <ReactMarkdown
               remarkPlugins={markdownPreviewRemarkPlugins}
               rehypePlugins={markdownPreviewRehypePlugins}
-              urlTransform={onOpenFile ? markdownUrlTransform : undefined}
+              urlTransform={onOpenFile ? markdownUrlTransform : markdownAppUrlTransform}
               components={{
                 code({ className, children, ...props }) {
                   const lang = className?.replace("language-", "").toLowerCase() ?? "";
@@ -2505,7 +2553,10 @@ const lines = sourceLines;
                     ? resolveLocalFileHref(href, markdownDirectory, cwd ?? markdownDirectory)
                     : null;
                   if (!linkedFile || !onOpenFile) {
-                    return <a href={href} {...props}>{children}</a>;
+                    // Like chat links: a web or app link must not replace Pi Web.
+                    return isExternalMarkdownHref(href)
+                      ? <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
+                      : <a href={href} {...props}>{children}</a>;
                   }
 
                   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -2533,6 +2584,13 @@ const lines = sourceLines;
               {markdownPreview}
             </ReactMarkdown>
           </div>
+        ) : isDelimitedTable && effectiveDisplayMode === "preview" ? (
+          <DelimitedTable
+            content={content}
+            filePath={filePath}
+            complete={!data?.truncated}
+            scrollRef={contentRef}
+          />
         ) : useLightweightSource ? (
           <div
             className="file-source-view is-lightweight"

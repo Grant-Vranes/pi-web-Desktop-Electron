@@ -54,6 +54,79 @@ test("workspace restoration remains inside the cross-project branch", () => {
   );
 });
 
+
+test("a linked session that is gone gets no other session in its place (#1168)", async (t) => {
+  const callbacks = [
+    callbackBody("restoreWorkspaceContext", "handleCwdChange"),
+    callbackBody("handleCwdChange", "handleSelectSession"),
+    callbackBody("handleInitialRestoreDone", "handleSessionDeleted"),
+  ].join("\n");
+  const parkedKeyHelper = source.slice(source.indexOf("function parkedNewSessionDraftKey"), source.indexOf("export function AppShell"));
+  const lastOpen = { id: "p1-last", cwd: "/p1", projectKey: "/p1" };
+  const otherLastOpen = { id: "p2-last", cwd: "/p2", projectKey: "/p2" };
+
+  for (const [label, linkedId] of [["from the URL", "gone"], ["from this tab's memory", null]]) {
+    await t.test(label, () => {
+      const urls = [];
+      const context = vm.createContext({
+        ...draftStore,
+        crypto: globalThis.crypto,
+        URLSearchParams,
+        window: { location: { pathname: "/", search: linkedId ? `?session=${linkedId}` : "" } },
+        router: { replace: (url) => urls.push(url) },
+        getLastOpenSession: (key) => ({ "/p1": lastOpen.id, "/p2": otherLastOpen.id })[key] ?? null,
+        clearLastOpen() {},
+        workspaceKeyOf: (value) => value.projectKey ?? value.cwd,
+        useCallback: (callback) => callback,
+        changeFileWorkspace() {},
+        switchProjectFileTabs() {},
+        activeNewSessionDraftKeyRef: { current: null },
+        activeProjectKeyRef: { current: null },
+        workspaceRestoreTokenRef: { current: 0 },
+        suppressCwdBumpRef: { current: false },
+        skipWorkspaceRestoreRef: { current: false },
+        initialLinkedSessionId: linkedId,
+        activeCwd: null,
+        newSessionCwd: null,
+        newSessionDraftId: "initial",
+        selectedSession: null,
+        sessionCatalog: [lastOpen, otherLastOpen],
+        sessionKey: 0,
+      });
+      context.invalidateWorkspaceRestore = () => context.workspaceRestoreTokenRef.current++;
+      for (const [setter] of callbacks.matchAll(/\bset[A-Z]\w*(?=\()/g)) {
+        const state = setter[3].toLowerCase() + setter.slice(4);
+        context[setter] = (value) => {
+          context[state] = typeof value === "function" ? value(context[state]) : value;
+        };
+      }
+      vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
+        globalThis.navigate = { handleCwdChange, handleInitialRestoreDone };
+      `), context);
+
+      // The sidebar's first load: its null cwd, the initial session missing
+      // from its list, then the most recent project, then its hydrated key.
+      context.navigate.handleCwdChange(null);
+      context.navigate.handleInitialRestoreDone();
+      context.navigate.handleCwdChange("/p1", "/p1", "/p1");
+      context.navigate.handleCwdChange("/p1", "/p1", "/p1-key");
+      if (linkedId) {
+        assert.equal(context.selectedSession, null, "a fresh composer, not the project's last session");
+        assert.equal(context.activeCwd, "/p1");
+        assert.ok(!urls.some((url) => url.includes("session=")), `no other session's URL: ${urls.join(", ")}`);
+      } else {
+        assert.equal(context.selectedSession?.id, lastOpen.id, "a fresh tab's fallback");
+        assert.ok(urls.includes(`?session=${lastOpen.id}`));
+      }
+
+      // Ordinary project switches keep their restore.
+      context.navigate.handleCwdChange("/p2", "/p2", "/p2");
+      assert.equal(context.selectedSession?.id, otherLastOpen.id);
+      assert.equal(context.skipWorkspaceRestoreRef.current, false);
+    });
+  }
+});
+
 test("New restores the draft after session navigation and workspace auto-restore", async (t) => {
   const callbacks = [
     callbackBody("restoreWorkspaceContext", "handleCwdChange"),
@@ -92,6 +165,7 @@ test("New restores the draft after session navigation and workspace auto-restore
         // sandbox predates; stub them like the other refs above.
         fileTabsRef: { current: [] },
         activeFileTabIdRef: { current: null },
+        skipWorkspaceRestoreRef: { current: false },
         branchLeafChangeFnRef: { current: null },
         liveFollowFrameRef: { current: null },
         bashRecoveryIdRef: { current: 0 },
@@ -100,6 +174,8 @@ test("New restores the draft after session navigation and workspace auto-restore
         // Module-level project file-tab helpers used by handleCwdChange.
         saveProjectFileTabs() {},
         loadProjectFileTabs: () => null,
+        changeFileWorkspace() {},
+        switchProjectFileTabs() {},
         isMobile: false,
         activeCwd: cwd,
         activeFileTabId: null,
@@ -200,6 +276,7 @@ test("New in another project adopts it up front and parks the composer's draft",
     activeProjectKeyRef: { current: "/p1" },
     workspaceRestoreTokenRef: { current: 0 },
     suppressCwdBumpRef: { current: false },
+    skipWorkspaceRestoreRef: { current: false },
     branchLeafChangeFnRef: { current: null },
     isMobile: false,
     activeCwd: "/p1",
@@ -219,6 +296,12 @@ test("New in another project adopts it up front and parks the composer's draft",
       context[state] = typeof value === "function" ? value(context[state]) : value;
     };
   }
+  context.switchProjectFileTabs = () => {};
+  context.changeFileWorkspace = () => {
+    context.fileTabs = [];
+    context.activeFileTabId = null;
+    context.rightPanelOpen = false;
+  };
   vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
     globalThis.navigate = { handleCwdChange, handleSelectSession, handleNewSession };
   `), context);
@@ -278,6 +361,7 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
     activeProjectKeyRef: { current: "/p1" },
     workspaceRestoreTokenRef: { current: 0 },
     suppressCwdBumpRef: { current: false },
+    skipWorkspaceRestoreRef: { current: false },
     branchLeafChangeFnRef: { current: null },
     chatInputRef: { current: null },
     newSessionChoicesRef: { current: choices },
@@ -300,6 +384,12 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
       context[state] = typeof value === "function" ? value(context[state]) : value;
     };
   }
+  context.switchProjectFileTabs = () => {};
+  context.changeFileWorkspace = () => {
+    context.fileTabs = [];
+    context.activeFileTabId = null;
+    context.rightPanelOpen = false;
+  };
   vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
     globalThis.navigate = { handleCwdChange, handleNewSession };
   `), context);
@@ -350,4 +440,3 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
   assert.equal(context.carriedNewSessionChoices, null);
   for (const key of ["parked-new:/p2", "parked-new:/p4", "new:p3-new:/p3"]) draftStore.clearDraft(key);
 });
-

@@ -7,6 +7,8 @@ import { listSessionFamilies, groupFamiliesByDay, type SessionDayGroup } from "@
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { loadCollapsedDayGroups, saveCollapsedDayGroups, hasCollapseBeenSeeded, markCollapseSeeded } from "@/lib/session-day-collapse";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
+import { isPlainActivation, sessionDeepLink } from "@/lib/session-links";
+import { SidebarToast, type SidebarToastAction, type SidebarToastData } from "./SidebarToast";
 import {
   newSessionContextKey,
   type NewSessionContext,
@@ -162,6 +164,8 @@ interface Props {
   /** What the sidebar shows for its cwd, for the bar above a fresh composer. */
   onNewSessionContextChange?: (context: NewSessionContext | null) => void;
   initialSessionId?: string | null;
+  /** `initialSessionId` is the URL's `?session=`: a toast says so when it is gone. */
+  initialSessionLinked?: boolean;
   skipInitialProjectSelection?: boolean;
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
@@ -565,9 +569,15 @@ function PiWebTitle({ projectName }: { projectName: string | null }) {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t, locale } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
+  const [toast, setToast] = useState<SidebarToastData | null>(null);
+  const toastIdRef = useRef(0);
+  const showToast = useCallback((message: string, actions: SidebarToastAction[] = [], tail?: string) => {
+    toastIdRef.current += 1;
+    setToast({ id: toastIdRef.current, message, ...(tail ? { tail } : {}), actions });
+  }, []);
   // Tracked in a ref only: the version is compared against the polled value to
   // decide whether the list needs reloading, and no render reads it.
   const sessionListVersionRef = useRef<number | null>(null);
@@ -719,7 +729,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }, SESSION_DETAILS_HYDRATION_DELAY_MS);
       });
     } else {
-      void loadSessions(false, true);
+      // Every refreshKey bump follows a change the server already invalidated
+      // the list for (a run's agent_end, a fork, a delete, a name, a new
+      // session). Forcing would rescan again and bump the version, so every
+      // other open tab would reload the list once more.
+      void loadSessions();
     }
 
     return () => {
@@ -910,7 +924,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       (id) => !allSessions.some((session) => session.id === id),
     );
     if (completedInBackground.length > 0 || hasUnlistedRunningSession) {
-      loadSessions(false, true);
+      // Not forced: a run's agent_end has already invalidated the server's list,
+      // and a forced rescan here, in every tab not showing that session, bumped
+      // the version again and made all the others reload once more.
+      void loadSessions();
     }
     if (completedWithNotifications.length > 0) {
       onBackgroundTaskDone?.();
@@ -1057,11 +1074,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
+        if (initialSessionLinked) showToast(t("sidebar.sessionNotFound"));
       }
       const projects = getRecentProjects(allSessions);
       if (projects.length > 0) setSelectedCwd(projects[0].root);
     }
-  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, selectedCwd, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone, showToast, t]);
 
   // Prefer an exact UI selection while a refetch is in flight. Once the
   // response catches up, the server-resolved path handles Windows case and
@@ -1585,7 +1603,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [scrollTargetSessionId, sessionDayGroups, collapsedDayGroups]);
 
   return (
-    <div className="project-sidebar-shell" style={{ display: "flex", height: "100%", overflow: "hidden" }}>
+    <div className="project-sidebar-shell" style={{ display: "flex", height: "100%", overflow: "hidden", position: "relative" }}>
       {customPathOpen && (
         <DirectoryPicker
           initialPath={customPathValue}
@@ -2219,6 +2237,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       )}
       </div>
+      <SidebarToast toast={toast} onDismiss={() => setToast(null)} dismissLabel={t("sidebar.dismiss")} />
     </div>
   );
 }
@@ -3529,9 +3548,38 @@ function SessionItem({
                 transition: "color 0.1s",
               }}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                {title}
-              </span>
+              {session.transient ? (
+                // No file yet: a link would open a session no other tab can load.
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                  {title}
+                </span>
+              ) : (
+                // A real link, so middle-click, Ctrl/Cmd-click and the browser's
+                // own gestures open the session in another tab. A plain click (or
+                // Enter) stays here and selects it as before; never `target`,
+                // which would send plain clicks away too.
+                <a
+                  className="session-tree-main"
+                  href={sessionDeepLink(session.id)}
+                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, color: "inherit", textDecoration: "none" }}
+                  onClick={(e) => {
+                    // The row's handler must not select it again, nor on a modified click.
+                    e.stopPropagation();
+                    if (!isPlainActivation(e)) return;
+                    e.preventDefault();
+                    onClick();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.stopPropagation();
+                    if (!isPlainActivation({ button: 0, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: e.altKey, defaultPrevented: e.defaultPrevented })) return;
+                    e.preventDefault();
+                    onClick();
+                  }}
+                >
+                  {title}
+                </a>
+              )}
             </div>
             <div style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 0, color: "var(--text-dim)", fontSize: 10.5, fontFamily: "var(--font-mono)", minWidth: 0, letterSpacing: "0.01em" }}>
               {isRunning ? (

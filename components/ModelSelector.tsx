@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { SelectorRow } from "./SelectorRow";
@@ -33,13 +33,6 @@ interface ModelSelectorProps {
 }
 
 const MODEL_FILTER_THRESHOLD = 8;
-const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-
-function compareModelOptions(a: ModelSelectorOption, b: ModelSelectorOption): number {
-  return MODEL_OPTION_COLLATOR.compare(a.name || a.modelId, b.name || b.modelId)
-    || MODEL_OPTION_COLLATOR.compare(a.provider, b.provider)
-    || MODEL_OPTION_COLLATOR.compare(a.modelId, b.modelId);
-}
 
 function providerLabel(option: ModelSelectorOption): string {
   return option.providerName || option.provider;
@@ -80,9 +73,10 @@ export function ModelSelector({
   const [anchorRect, setAnchorRect] = useState<{ top: number; right: number; bottom: number; left: number; width: number } | null>(null);
   const [filter, setFilter] = useState("");
   const locked = disabled || busy;
-  const sortedOptions = useMemo(() => [...options].sort(compareModelOptions), [options]);
-  const filteredOptions = filterModelOptions(sortedOptions, filter);
-  const showFilter = sortedOptions.length > MODEL_FILTER_THRESHOLD;
+  // Options arrive in pi's /model order (orderSelectorModels()); never re-sort
+  // them, or a models.json provider loses the order its file gives (#783).
+  const filteredOptions = filterModelOptions(options, filter);
+  const showFilter = options.length > MODEL_FILTER_THRESHOLD;
   const modelsByProvider: { provider: string; options: ModelSelectorOption[] }[] = [];
 
   for (const option of filteredOptions) {
@@ -96,14 +90,14 @@ export function ModelSelector({
   // provider keeps its original display name and casing (e.g. "Anthropic").
   const currentName = selectedLabel ?? (value
     ? (() => {
-        const match = sortedOptions.find((option) => option.modelId === value.modelId && option.provider === value.provider);
+        const match = options.find((option) => option.modelId === value.modelId && option.provider === value.provider);
         const provider = match
           ? providerLabel(match)
-          : sortedOptions.find((option) => option.provider === value.provider)?.providerName ?? value.provider;
+          : options.find((option) => option.provider === value.provider)?.providerName ?? value.provider;
         const name = match?.name ?? value.modelId;
         return provider ? `${provider}/${name}` : name;
       })()
-    : emptyLabel ?? (sortedOptions.length > 0 ? "Select model" : "No models"));
+    : emptyLabel ?? (options.length > 0 ? "Select model" : "No models"));
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -198,7 +192,7 @@ export function ModelSelector({
         aria-expanded={open}
         aria-busy={busy || undefined}
         disabled={locked}
-        title={busy ? "Switching model" : locked ? currentName : sortedOptions.length > 0 || onClear ? "Change model" : "No available models"}
+        title={busy ? "Switching model" : locked ? currentName : options.length > 0 || onClear ? "Change model" : "No available models"}
         style={buttonStyle}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();

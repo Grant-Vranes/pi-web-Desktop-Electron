@@ -88,9 +88,14 @@ export function PinOffIcon(props: SidebarIconProps) {
   );
 }
 
-/** Points right; a class on it turns it down for an expanded section. */
-export function ChevronIcon(props: SidebarIconProps) {
-  return <SidebarIcon {...props}><path d="m9 6 6 6-6 6" /></SidebarIcon>;
+/**
+ * Points right; a class on it turns it down for an expanded section. Section
+ * headers pass `strokeWidth={3}`: at their 12px that is a 1.5px line, as
+ * firm as their bold label. Elsewhere (menus, the archive's Back, the
+ * pickers) it keeps the stroke of the icons beside it.
+ */
+export function ChevronIcon({ strokeWidth, ...props }: SidebarIconProps & { strokeWidth?: number }) {
+  return <SidebarIcon {...props} strokeWidth={strokeWidth}><path d="m9 6 6 6-6 6" /></SidebarIcon>;
 }
 
 export function BranchIcon(props: SidebarIconProps) {
@@ -113,6 +118,17 @@ export function ForkIcon(props: SidebarIconProps) {
       <circle cx="12" cy="19" r="2.5" />
       <path d="M6 7.5v1.5a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7.5" />
       <path d="M12 12v4.5" />
+    </SidebarIcon>
+  );
+}
+
+/** An arrow leaving a box: a session row's "Open in new tab" (a browser tab, not a copy). */
+export function OpenInNewTabIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M14 4h6v6" />
+      <path d="M20 4 11 13" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
     </SidebarIcon>
   );
 }

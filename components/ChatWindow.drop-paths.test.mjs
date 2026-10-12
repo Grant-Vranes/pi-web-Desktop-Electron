@@ -8,7 +8,9 @@ test("partitions dropped images and path mentions without uploading path items",
   assert.match(source, /const onDrop = useCallback\(\(\{ imageFiles, pathMentions, hasNonImageFiles, internalPaths, hasUnresolvedDirectory \}: DropPayload, dataTransfer: DataTransfer\) => \{/);
   assert.match(source, /if \(imageFiles\.length > 0\) chatInputRef\?\.current\?\.addImages\(imageFiles\);/);
   assert.match(source, /if \(pathMentions\) \{\s*chatInputRef\?\.current\?\.insertPathMentions\(pathMentions\);\s*return;\s*}/);
-  assert.match(source, /if \(hasNonImageFiles\) addNotice\(\{ type: "warning", message: "Could not access the dropped item's local path in this browser" \}\);/);
+  // Upstream #1101: non-image drops are uploaded into the cwd; the warning
+  // remains only as the fallback when nothing can be uploaded.
+  assert.match(source, /if \(hasNonImageFiles\) \{\s*const nonImageFiles = Array\.from\(dataTransfer\.files\)\.filter\(\(file\) => !file\.type\.startsWith\("image\/"\)\);\s*if \(nonImageFiles\.length > 0\) \{\s*void uploadDroppedFiles\(nonImageFiles\);\s*return;\s*}\s*addNotice\(\{ type: "warning", message: "Could not access the dropped item's local path in this browser" \}\);\s*}/);
 });
 
 test("rewrites internal file-explorer drags as relative @mentions", () => {

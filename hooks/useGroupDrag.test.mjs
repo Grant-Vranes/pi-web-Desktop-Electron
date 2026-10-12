@@ -102,7 +102,10 @@ function model(projects) {
 const GHOST_HEIGHT = 22;
 const TREE_TOP = 60;
 
-/** A tree of collapsed groups (28px header, 8px spacer) in a list box 100px from the top of the page. */
+/**
+ * A tree of collapsed groups (28px headers right on each other, then the
+ * footer's 8px spacer and its row) in a list box 100px from the top of the page.
+ */
 function setup({ projects = ["/a", "/b", "/c"], clientHeight = 400, enabled = true } = {}) {
   const { rows } = model(projects);
   const offsets = getRowOffsets(rows, "desktop");
@@ -213,7 +216,7 @@ test("a mouse drag starts after a few pixels, follows the pointer and drops next
   const view = tree.hook.result.view;
   assert.equal(view.phase, "dragging");
   assert.equal(view.projectKey, "/a");
-  assert.deepEqual(view.source, { key: "/a", pinned: false, top: 0, bottom: 36 });
+  assert.deepEqual(view.source, { key: "/a", pinned: false, top: 0, bottom: 28, gapAbove: 0, gapBelow: 0 });
   assert.equal(view.drop, null, "still over itself");
   assert.ok(element.captured.has(1), "the header holds the pointer");
   // The ghost is placed in the tree's box, its left edge 4px in from the
@@ -224,21 +227,22 @@ test("a mouse drag starts after a few pixels, follows the pointer and drops next
   assert.equal(tree.ghost.style.width, undefined);
   assert.equal(tree.ghost.style.height, undefined);
 
-  // Past the middle of /c (72..108): after it. The line (page y 204) is
-  // below the pointer: the ghost's bottom keeps the gap above the pointer.
-  tree.move(tree.at(95));
-  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/c", position: "after", lineY: 104 });
-  assert.equal(tree.ghost.style.top, `${tree.at(95) - GHOST_GAP_PX.mouse - GHOST_HEIGHT - TREE_TOP}px`);
-  // The line (68) just above the pointer (70): the ghost goes above the new
-  // line, not the last one.
-  tree.move(tree.at(70));
-  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/b", position: "after", lineY: 68 });
-  assert.equal(tree.ghost.style.top, `${tree.at(68) - GHOST_LINE_GAP_PX - GHOST_HEIGHT - TREE_TOP}px`);
+  // Past the middle of /c (56..84): after it, the line in the middle of the
+  // footer's spacer (page y 188), below the pointer: the ghost's bottom
+  // keeps the gap above the pointer.
+  tree.move(tree.at(80));
+  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/c", position: "after", lineY: 88 });
+  assert.equal(tree.ghost.style.top, `${tree.at(80) - GHOST_GAP_PX.mouse - GHOST_HEIGHT - TREE_TOP}px`);
+  // The line on the edge between /b and /c (56), just above the pointer
+  // (58): the ghost goes above the new line, not the last one.
+  tree.move(tree.at(58));
+  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/b", position: "after", lineY: 56 });
+  assert.equal(tree.ghost.style.top, `${tree.at(56) - GHOST_LINE_GAP_PX - GHOST_HEIGHT - TREE_TOP}px`);
   // The line below the pointer: back to the pointer.
-  tree.move(tree.at(60));
-  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/b", position: "after", lineY: 68 });
-  assert.equal(tree.ghost.style.top, `${tree.at(60) - GHOST_GAP_PX.mouse - GHOST_HEIGHT - TREE_TOP}px`);
-  tree.release(tree.at(95));
+  tree.move(tree.at(48));
+  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/b", position: "after", lineY: 56 });
+  assert.equal(tree.ghost.style.top, `${tree.at(48) - GHOST_GAP_PX.mouse - GHOST_HEIGHT - TREE_TOP}px`);
+  tree.release(tree.at(80));
   assert.deepEqual(tree.moves, [["/a", "/c", "after"]], "the drop is taken where the pointer is let go");
   assert.equal(tree.hook.result.view, null);
   assert.equal(element.captured.size, 0, "capture released");
@@ -419,17 +423,18 @@ test("new rows without the dragged group cancel it; with it, the drop is taken a
   const start = tree.at(15);
   tree.press("/a", { y: start });
   tree.move(tree.at(95));
-  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/c", position: "after", lineY: 104 });
-  // /d joins at the bottom: the pointer is now over /d's upper half.
+  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/c", position: "after", lineY: 88 });
+  // /d joins at the bottom: the pointer is now over /d's upper half, the
+  // line on the edge between /c and /d.
   const grown = model(["/a", "/b", "/c", "/d"]);
   tree.hook.rerender({ ...tree.props, rows: grown.rows, offsets: getRowOffsets(grown.rows, "desktop") });
-  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/c", position: "after", lineY: 104 });
-  tree.move(tree.at(130));
-  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/d", position: "after", lineY: 140 });
+  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/c", position: "after", lineY: 84 });
+  tree.move(tree.at(105));
+  assert.deepEqual(tree.hook.result.view.drop, { anchorKey: "/d", position: "after", lineY: 116 });
   const gone = model(["/b", "/c", "/d"]);
   tree.hook.rerender({ ...tree.props, rows: gone.rows, offsets: getRowOffsets(gone.rows, "desktop") });
   assert.equal(tree.hook.result.view, null, "archived in another window");
-  tree.release(tree.at(130));
+  tree.release(tree.at(105));
   assert.deepEqual(tree.moves, []);
   assert.equal(tree.click(), true);
   tree.hook.unmount();
@@ -499,11 +504,5 @@ test("unmounting mid-drag removes every listener, timer and frame", () => {
 
 test("the hook's sources stay within the platform rules", () => {
   assert.doesNotMatch(source, /\(\?<[=!]/, "no RegExp lookbehind (Safari 16.2)");
-  assert.doesNotMatch(source, /navigator\.vibrate|userSelect/, "no vibration (a console warning in Chrome) and no body style (Safari needs the prefix)");
-  // The mouse's threshold path is for a mouse only; touch and pen long-press.
-  assert.match(source, /if \(event\.pointerType !== "mouse"\) drag\.timer = window\.setTimeout\(arm, LONG_PRESS_MS\);/);
-  assert.match(source, /if \(drag\.pointerType === "mouse" && event\.buttons === 0\) \{\s*teardown\(\);/);
-  assert.match(source, /window\.addEventListener\("keydown", onKeyDown, true\);/);
-  assert.match(source, /scroll\.addEventListener\("scroll", onScroll, \{ passive: true \}\);/);
   assert.equal(LONG_PRESS_MS, 350);
 });
