@@ -1,6 +1,6 @@
 # Pi Web
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [Русский](./README.ru.md)
+[English](../README.md) | [简体中文](./README.zh-CN.md) | [Русский](./README.ru.md)
 
 [pi コーディングエージェント](https://github.com/earendil-works/pi) のローカルブラウザー UI です。Pi Web は pi と同じローカル設定とセッションファイルを使用し、ブラウザーから会話の検索と再開、エージェントの実行、モデルやリソースの設定、プロジェクトファイルの確認を行えます。
 
@@ -115,7 +115,7 @@ npx @agegr/pi-web@latest
 - **ファイルシステムへのアクセス**：Pi Web はエージェントデータディレクトリと、セッションに記録された作業ディレクトリを読み取れる必要があります。既存の pi セッションを共有する場合は、pi と同じファイルシステム環境で Pi Web を実行してください。
 - **共有設定**：Models パネルは pi のモデル、設定、認証情報ストレージを使用するため、変更は両方のインターフェースに反映されます。
 - **ファイルアクセスの範囲**：ファイルブラウザーは、Pi Web で選択した作業ディレクトリと、既知のプロジェクトまたはセッションルートに限定されます。汎用のファイルシステムブラウザーではありません。
-- **Git worktree**：スイッチャーの表示条件、worktree の作成、削除時の動作については [Worktrees in Pi Web](./docs/worktrees.md) を参照してください。
+- **Git worktree**：スイッチャーの表示条件、worktree の作成、削除時の動作については [Worktrees in Pi Web](./worktrees.md) を参照してください。
 
 ## 開発
 
@@ -134,6 +134,7 @@ npm run lint
 
 通常の開発中は `next build` または `npm run build` を実行しないでください。`.next/` に書き込まれ、開発サーバーに影響する可能性があります。ビルドはリリース作業時にのみ実行してください。
 
+<<<<<<<< HEAD:README_Original/README.ja.md
 ## デスクトップ（Electron）
 
 このリポジトリには `desktop/` に Electron ラッパーが含まれており、Pi Web をローカルで起動し、トレイ・バックグラウンド挙動とネイティブのセッション行コンテキストメニュー連携を追加します。
@@ -179,6 +180,11 @@ npm run desktop:dist
 > `.build-tmp/` は既に `.gitignore` に含まれています。
 
 コントリビューター向けガイド：[Internationalization](./docs/i18n.md) と [Release process](./docs/release.md)。
+========
+新機能に取りかかる前に、[Contributing](../CONTRIBUTING.md) で対象範囲とプルリクエスト前のチェック項目を確認してください。
+
+コントリビューター向けガイド：[Internationalization](./i18n.md) と [Release process](./release.md)。
+>>>>>>>> upstream/main:docs/README.ja.md
 
 ## リポジトリ構成
 
@@ -193,8 +199,8 @@ docs/            ユーザーおよびコントリビューター向けの個別
 demo/            GitHub Pages で公開する静的デモ（demo/README.md を参照）
 ```
 
-アーキテクチャの説明と詳細なファイルマップについては [AGENTS.md](./AGENTS.md) を参照してください。
+アーキテクチャの説明と詳細なファイルマップについては [AGENTS.md](../AGENTS.md) を参照してください。
 
 ## ライセンス
 
-[MIT](./LICENSE)
+[MIT](../LICENSE)

@@ -1,6 +1,6 @@
 # Pi Web
 
-[English](./README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+[English](../README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
 [pi 编程智能体](https://github.com/earendil-works/pi)的本地浏览器界面。Pi Web 与 pi 共用本机配置和会话文件，可在浏览器中查找和继续对话、运行智能体、配置模型与资源，并查看项目文件。
 
@@ -120,7 +120,7 @@ npx @agegr/pi-web@latest
 - **文件系统访问**：Pi Web 必须能读取智能体数据目录及会话记录中的工作目录。与现有 pi 会话共用数据时，请让 Pi Web 运行在与 pi 相同的文件系统环境中。
 - **共享配置**：模型面板使用 pi 的模型、设置和凭据存储，因此两种界面都能看到相关更改。
 - **文件访问边界**：文件浏览器仅能访问在 Pi Web 中选择过的工作目录，以及它已识别的项目或会话根目录；它不是通用的文件系统浏览器。
-- **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./docs/worktrees.zh-CN.md)。
+- **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./worktrees.zh-CN.md)。
 
 ## 开发
 
@@ -139,6 +139,7 @@ npm run lint
 
 日常开发时不要运行 `next build` 或 `npm run build`。它们会写入 `.next/`，可能干扰开发服务器；仅在发布流程中执行构建。
 
+<<<<<<<< HEAD:README_Original/README.zh-CN.md
 ## 桌面端（Electron）
 
 仓库在 `desktop/` 下包含一个 Electron 封装，用于在本地启动 Pi Web，并提供托盘/后台行为以及原生的会话行右键菜单集成。
@@ -184,6 +185,11 @@ npm run desktop:dist
 > `.build-tmp/` 已在 `.gitignore` 中忽略。
 
 贡献者文档：[国际化](./docs/i18n.md)和[发布流程](./docs/release.md)。
+========
+开始做新功能之前，请先阅读[参与贡献](./CONTRIBUTING.zh-CN.md)，了解哪些改动在范围内以及提交 PR 前的检查项。
+
+贡献者文档：[国际化](./i18n.md)和[发布流程](./release.md)。
+>>>>>>>> upstream/main:docs/README.zh-CN.md
 
 ## 仓库结构
 
@@ -198,8 +204,8 @@ docs/            面向用户和贡献者的专题文档
 demo/            发布到 GitHub Pages 的静态演示站（见 demo/README.md）
 ```
 
-架构说明和详细文件地图见 [AGENTS.md](./AGENTS.md)。
+架构说明和详细文件地图见 [AGENTS.md](../AGENTS.md)。
 
 ## 许可证
 
-[MIT](./LICENSE)
+[MIT](../LICENSE)
