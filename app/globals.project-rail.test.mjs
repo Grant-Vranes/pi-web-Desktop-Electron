@@ -19,6 +19,16 @@ test("project rail items use quiet borderless cards and a refined active state",
   );
 });
 
+test("project rail shows overflow cues when the tile list scrolls", () => {
+  assert.match(source, /\.project-rail-list\.is-overflow-top\s*\{[\s\S]*?mask-image: linear-gradient\(to bottom, transparent 0, #000 24px\);/);
+  assert.match(source, /\.project-rail-list\.is-overflow-bottom\s*\{[\s\S]*?mask-image: linear-gradient\(to top, transparent 0, #000 24px\);/);
+  // The arrows float over the fade, stay quiet at rest, and wake on hover.
+  assert.match(source, /\.project-rail-overflow\s*\{[\s\S]*?opacity: 0\.5;[\s\S]*?transition: opacity 140ms ease, color 140ms ease;/);
+  assert.match(source, /\.project-rail-overflow:hover\s*\{[\s\S]*?opacity: 1;/);
+  assert.match(source, /\.project-rail-overflow\.is-top\s*\{[\s\S]*?top: 38px;/);
+  assert.match(source, /\.project-rail-overflow\.is-bottom\s*\{[\s\S]*?bottom: 45px;/);
+});
+
 test("project card activity and drag state selectors remain available", () => {
   assert.match(source, /\.project-rail-item\.is-dragging\s*\{/);
   assert.match(source, /\.project-rail-item\.is-drop-before::before,/);

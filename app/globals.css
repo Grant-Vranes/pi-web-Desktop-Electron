@@ -2646,6 +2646,60 @@ span.token.table {
   scrollbar-width: none;
 }
 .project-rail-list::-webkit-scrollbar { display: none; }
+
+/* "More above / more below" overflow cue: when the hidden-scrollbar list has
+   tiles scrolled out at one end, that edge fades out via a mask instead of
+   showing an overlaid chevron. The clipped tiles dissolve softly, which reads
+   as "there is more" without adding any chrome. */
+.project-rail-list.is-overflow-top {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+}
+.project-rail-list.is-overflow-bottom {
+  mask-image: linear-gradient(to top, transparent 0, #000 24px);
+  -webkit-mask-image: linear-gradient(to top, transparent 0, #000 24px);
+}
+.project-rail-list.is-overflow-top.is-overflow-bottom {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 24px), linear-gradient(to top, transparent 0, #000 24px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px), linear-gradient(to top, transparent 0, #000 24px);
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
+/* Small scroll arrow floating in each faded edge. Mostly a passive "there is
+   more" cue; clickable as a convenience (scrolls a few tiles). Kept quiet:
+   dim ink at rest, full ink on hover, no border or chip. */
+.project-rail-overflow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0.5;
+  transition: opacity 140ms ease, color 140ms ease;
+}
+.project-rail-overflow:hover {
+  opacity: 1;
+  color: var(--text);
+}
+.project-rail-overflow svg { display: block; }
+.project-rail-overflow.is-top {
+  /* Below the mark (11px padding + 26px mark + its bottom border). */
+  top: 38px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg-panel) 86%, var(--bg)), transparent);
+}
+.project-rail-overflow.is-bottom {
+  /* Above the add button (8px padding + 36px button). */
+  bottom: 45px;
+  background: linear-gradient(to top, color-mix(in srgb, var(--bg-panel) 86%, var(--bg)), transparent);
+}
 .project-rail-item,
 .project-rail-add {
   position: relative;

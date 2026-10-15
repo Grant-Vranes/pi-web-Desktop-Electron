@@ -2398,6 +2398,40 @@ function ProjectRail({
   // OS folder drags highlight the whole rail; a depth counter keeps the
   // highlight stable while the pointer crosses tile boundaries.
   const [folderDragActive, setFolderDragActive] = useState(false);
+  // "More above / more below" overflow cues: the rail list hides its scrollbar,
+  // so when projects exceed the visible height the clipped tiles are invisible.
+  // These flags track whether content is scrolled out at either end.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [railOverflow, setRailOverflow] = useState<{ up: boolean; down: boolean }>({ up: false, down: false });
+  const measureRailOverflow = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    setRailOverflow({
+      up: el.scrollTop > 1,
+      down: el.scrollTop + el.clientHeight < el.scrollHeight - 1,
+    });
+  }, []);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    measureRailOverflow();
+    el.addEventListener("scroll", measureRailOverflow, { passive: true });
+    // Re-measure when the rail's height or the tile count changes.
+    const observer = new ResizeObserver(measureRailOverflow);
+    observer.observe(el);
+    const mutation = new MutationObserver(measureRailOverflow);
+    mutation.observe(el, { childList: true });
+    return () => {
+      el.removeEventListener("scroll", measureRailOverflow);
+      observer.disconnect();
+      mutation.disconnect();
+    };
+  }, [measureRailOverflow, projects.length]);
+  /** Clicking an overflow arrow nudges the hidden-scrollbar list by a few
+   *  tiles; direction is -1 (up) or 1 (down). */
+  const scrollRail = useCallback((direction: -1 | 1) => {
+    listRef.current?.scrollBy({ top: direction * 129, behavior: "smooth" });
+  }, []);
   const folderDragDepthRef = useRef(0);
   const resetFolderDrag = useCallback(() => {
     folderDragDepthRef.current = 0;
@@ -2481,7 +2515,7 @@ function ProjectRail({
           <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h4l1.7 2H18.5A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z" />
         </svg>
       </div>
-      <div className="project-rail-list">
+      <div className={`project-rail-list${railOverflow.up ? " is-overflow-top" : ""}${railOverflow.down ? " is-overflow-bottom" : ""}`} ref={listRef}>
         {projects.map((project) => {
           const active = project.key === selectedProjectKey;
           const state = activity.get(project.key);
@@ -2566,6 +2600,28 @@ function ProjectRail({
           );
         })}
       </div>
+      {railOverflow.up ? (
+        <button
+          type="button"
+          className="project-rail-overflow is-top"
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={() => scrollRail(-1)}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 15 12 9 18 15" /></svg>
+        </button>
+      ) : null}
+      {railOverflow.down ? (
+        <button
+          type="button"
+          className="project-rail-overflow is-bottom"
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={() => scrollRail(1)}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+      ) : null}
       <button type="button" className="project-rail-add" onClick={onAddProject} title={t("sidebar.selectProject")} aria-label={t("sidebar.selectProject")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
       </button>
