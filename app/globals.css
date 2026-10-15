@@ -2615,8 +2615,8 @@ span.token.table {
    monochrome tiles let the status signals (blue spin / cyan pulse) do the work. */
 .project-rail {
   position: relative;
-  width: 52px;
-  min-width: 52px;
+  width: var(--project-rail-width, 52px);
+  min-width: var(--project-rail-width, 52px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2634,10 +2634,13 @@ span.token.table {
   border-bottom: 1px solid var(--border);
 }
 .project-rail-list {
-  display: flex;
+  /* Auto-flowing grid: the rail starts as one narrow signal-light column and
+     tiles repack into extra columns as the user widens it by dragging. */
+  display: grid;
   flex: 1;
-  flex-direction: column;
-  align-items: center;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  justify-items: center;
+  align-content: start;
   width: 100%;
   gap: 7px;
   overflow-y: auto;
@@ -2799,6 +2802,18 @@ span.token.table {
 .project-rail.is-folder-drag .project-rail-add {
   opacity: 0.28;
 }
+/* The rail already shows a border at the divider; the shared handle's hover
+   highlight would double up there, so hover stays quiet (resizing still
+   shows the bar). */
+.project-rail-resize-handle:hover::after {
+  background: transparent;
+}
+.project-rail-resize-handle {
+  z-index: 60;
+}
+.project-rail-resize-handle::after {
+  left: 5px;
+}
 .project-rail-drop-overlay {
   position: absolute;
   z-index: 6;
@@ -2896,7 +2911,6 @@ span.token.table {
   place-items: center;
   width: 36px;
   height: 36px;
-  flex: 0 0 36px;
 }
 .project-rail-tile .project-rail-item {
   width: 100%;
@@ -3561,3 +3575,8 @@ span.token.table {
     display: none !important;
   }
 }
+
+/* rail width var */
+
+/* grid repack */
+

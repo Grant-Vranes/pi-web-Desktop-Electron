@@ -1591,6 +1591,11 @@ export function AppShell() {
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onSessionsChange={handleSessionsChange}
+        onRailWidthChange={(width, previousWidth) => {
+          // The rail's gain is the conversations area's loss: widen the whole
+          // sidebar by the same delta so only the chat side gives up space.
+          sidebarResizer.applyWidth(sidebarWidthRef.current + (width - previousWidth));
+        }}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([

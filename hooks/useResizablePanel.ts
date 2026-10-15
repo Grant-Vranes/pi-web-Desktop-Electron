@@ -87,6 +87,7 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
   const [width, setWidth] = useState(defaultWidth);
   const [isResizing, setIsResizing] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [restored, setRestored] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
   const effectiveMaxWidth = useCallback(
@@ -257,6 +258,7 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     if (storedWidth !== null && storedWidth !== restoredWidth) {
       writeStoredWidth(storageKey, restoredWidth);
     }
+    setRestored(true);
   }, [commitWidth, defaultWidth, getDefaultWidth, maxWidth, minWidth, persistClamp, storageKey]);
 
   useEffect(() => {
@@ -301,6 +303,12 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     panelRef,
     reclampWidth,
     resetWidth,
+    /** False until the stored width has been read and applied after mount;
+     *  width changes before that are restoration, not user resizing. */
+    restored,
+    /** Programmatic width change (persists like a drag commit); used when a
+     *  nested panel's resize must expand the panel that contains it. */
+    applyWidth: (candidate: number) => commitWidth(candidate, { forcePersist: true }),
     separatorProps: {
       "aria-label": ariaLabel,
       "aria-orientation": axis === "vertical" ? "horizontal" as const : "vertical" as const,

@@ -192,6 +192,9 @@ interface Props {
   onBackgroundTaskDone?: () => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
   onSessionsChange?: (sessions: SessionInfo[]) => void;
+  /** The project-rail column grew/shrank; the shell widens the sidebar to
+   *  match so the rail never squeezes the conversations area. */
+  onRailWidthChange?: (width: number, previousWidth: number) => void;
 }
 
 
@@ -228,6 +231,10 @@ const SESSION_PANE_DEFAULT_HEIGHT = 320;
 const SESSION_PANE_MIN_HEIGHT = 80;
 const EXPLORER_PANE_MIN_HEIGHT = 120;
 const SESSION_PANE_MAX_HEIGHT = 1600;
+/** Project rail (signal-light column) width limits for drag resizing. */
+const PROJECT_RAIL_DEFAULT_WIDTH = 52;
+const PROJECT_RAIL_MIN_WIDTH = 52;
+const PROJECT_RAIL_MAX_WIDTH = 160;
 
 function loadLastCustomCwd(): string {
   if (typeof window === "undefined") return "";
@@ -569,7 +576,7 @@ function PiWebTitle({ projectName }: { projectName: string | null }) {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange, onRailWidthChange }: Props) {
   const { t, locale } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [toast, setToast] = useState<SidebarToastData | null>(null);
@@ -655,6 +662,36 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
   const explorerScrollRef = useRef<HTMLDivElement>(null);
   useScrollbarVisibility(explorerScrollRef, explorerOpen && Boolean(selectedCwdProp || selectedCwd));
+  // Draggable project-rail column width, persisted in localStorage by the hook.
+  const railWidthRef = useRef(PROJECT_RAIL_DEFAULT_WIDTH);
+  const railResizer = useResizablePanel({
+    ariaLabel: t("layout.resizeProjectRail"),
+    cssVariable: "--project-rail-width",
+    defaultWidth: PROJECT_RAIL_DEFAULT_WIDTH,
+    getMaxWidth: () => Math.max(PROJECT_RAIL_MIN_WIDTH, Math.floor(window.innerWidth * 0.25)),
+    growthDirection: "right",
+    maxWidth: PROJECT_RAIL_MAX_WIDTH,
+    minWidth: PROJECT_RAIL_MIN_WIDTH,
+    storageKey: "pi-project-rail-width",
+    widthRef: railWidthRef,
+  });
+  // Report committed rail-width deltas so the shell can grow the sidebar by
+  // the same amount (the rail must push the sidebar wider, not squeeze the
+  // conversations area beside it).
+  const reportedRailWidthRef = useRef<number | null>(null);
+  useEffect(() => {
+    // Skip pre-restore commits: the stored width returning from localStorage
+    // is restoration, not a resize the sidebar should grow by.
+    if (!railResizer.restored) return;
+    if (reportedRailWidthRef.current === null) {
+      reportedRailWidthRef.current = railResizer.width;
+      return;
+    }
+    if (railResizer.width !== reportedRailWidthRef.current) {
+      onRailWidthChange?.(railResizer.width, reportedRailWidthRef.current);
+      reportedRailWidthRef.current = railResizer.width;
+    }
+  }, [railResizer.width, railResizer.restored, onRailWidthChange]);
 
   // NOTE: upstream's virtualized session-list window (listScrollRef,
   // listViewportH/listScrollTop, focusedSessionId, handleListScroll and
@@ -1603,7 +1640,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [scrollTargetSessionId, sessionDayGroups, collapsedDayGroups]);
 
   return (
-    <div className="project-sidebar-shell" style={{ display: "flex", height: "100%", overflow: "hidden", position: "relative" }}>
+    <div ref={railResizer.panelRef} className="project-sidebar-shell" style={{ display: "flex", height: "100%", overflow: "hidden", position: "relative" }}>
       {customPathOpen && (
         <DirectoryPicker
           initialPath={customPathValue}
@@ -1647,6 +1684,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onDeleteProject={handleDeleteProject}
         projectAliases={projectAliases}
         onRenameProject={handleRenameProject}
+      />
+      <div
+        {...railResizer.separatorProps}
+        className={`panel-resize-handle project-rail-resize-handle${railResizer.isResizing ? " is-resizing" : ""}`}
+        data-resize-handle="project-rail"
+        title={`${t("layout.resizeProjectRail")}: ${t("layout.resizeHint")}`}
       />
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
       {/* Workspace module */}
