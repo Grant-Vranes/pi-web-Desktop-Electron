@@ -4,6 +4,8 @@ export const THEME_OPTIONS = [
   { id: "mist", label: "settings.themeMist" },
   { id: "rose", label: "settings.themeRose" },
   { id: "pine", label: "settings.themePine" },
+  { id: "meadow", label: "settings.themeMeadow" },
+  { id: "newsprint", label: "settings.themeNewsprint" },
   { id: "auto", label: "settings.themeSystem" },
 ] as const;
 

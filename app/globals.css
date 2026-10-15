@@ -144,6 +144,59 @@ html[data-theme="pine"],
   --bg-subtle: rgba(210,236,219,0.04);
 }
 
+[data-theme="meadow"] {
+  color-scheme: light;
+  --bg: #fbfbf6;
+  --bg-panel: #f2f4e9;
+  --bg-hover: #eaeedc;
+  --bg-selected: #dfe6c8;
+  --border: #c2cd9e;
+  --text: #2a3020;
+  --text-muted: #5d6b45;
+  --text-dim: #6e7a56;
+  --accent: #5f7d1e;
+  --accent-hover: #4c6615;
+  --accent-contrast: #ffffff;
+  --user-bg: #eef2d9;
+  --assistant-bg: #fbfbf6;
+  --tool-bg: #f4f6ec;
+  --bg-subtle: rgba(58,74,28,0.04);
+}
+
+[data-theme="newspaper"] {
+  color-scheme: light;
+  background: var(--bg);
+  --bg: #f5f1e6;
+  --bg-panel: #ece6d6;
+  --bg-hover: #e4ddc9;
+  --bg-selected: #dbd2b8;
+  --border: #c8bda0;
+  --text: #26221a;
+  --text-muted: #6b6353;
+  --text-dim: #7d7462;
+  --accent: #8c2f2a;
+  --accent-hover: #742521;
+  --accent-contrast: #f5f1e6;
+  --user-bg: #e9e2cd;
+  --assistant-bg: #f5f1e6;
+  --tool-bg: #efe9da;
+  --bg-subtle: rgba(80,66,40,0.05);
+}
+
+/* Newspaper: paper grain + fiber texture as a fixed overlay, generated inline
+   (no image assets). Opaque app surfaces would hide a plain body background,
+   so the texture is layered on top with pointer-events disabled. */
+[data-theme="newspaper"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3CfeColorMatrix values='0 0 0 0 0.42 0 0 0 0 0.37 0 0 0 0 0.27 0 0 0 0.12 0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.09' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.44 0 0 0 0 0.32 0 0 0 0.10 0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23f)'/%3E%3C/svg%3E");
+}
+
 /* WebKit reports dvh/innerHeight without the status-bar strip for installed
    home-screen apps even though the layout still starts at the screen's top.
    In standalone mode there is no browser toolbar to make vh unstable, and vh
