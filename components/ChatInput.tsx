@@ -196,6 +196,11 @@ export function replaceTextareaRange(
   }
 }
 
+// Above these sizes the HTML→markdown link rewrite in handlePaste is skipped
+// and the paste falls through to the browser's native (fast) plain-text insertion.
+const MAX_PASTE_MARKDOWN_TEXT_LENGTH = 200_000;
+const MAX_PASTE_MARKDOWN_HTML_LENGTH = 1_000_000;
+
 export function replaceLinksWithMarkdown(
   text: string,
   links: Iterable<{ label: string; href: string; occurrence: number }>,
@@ -1564,17 +1569,38 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     const html = e.clipboardData.getData("text/html");
     const text = e.clipboardData.getData("text/plain");
     if (!html || !text) return;
+    // Rich-text (HTML) pastes get their links rewritten to markdown. Parsing
+    // and walking huge documents blocks the main thread, so skip the rewrite
+    // for oversized pastes and let the browser insert the plain text natively.
+    if (text.length > MAX_PASTE_MARKDOWN_TEXT_LENGTH || html.length > MAX_PASTE_MARKDOWN_HTML_LENGTH) return;
     const document = new DOMParser().parseFromString(html, "text/html");
+    // occurrence counts how many times each label appeared before its link.
+    // Walking a Range up to every link stringifies the whole document per link
+    // (O(links x document)); counting against one snapshot with a monotonic
+    // per-label cursor is linear. Non-anchor occurrences between links are not
+    // counted, which only affects the tie-break for duplicate labels.
+    const bodyText = document.body.textContent ?? "";
+    const labelCursors = new Map<string, { pos: number; count: number }>();
     const links = Array.from(document.querySelectorAll("a[href]"), (link) => {
       const label = link.textContent ?? "";
-      const range = document.createRange();
-      range.setStart(document.body, 0);
-      range.setEndBefore(link);
-      return {
-        label,
-        href: link.getAttribute("href")?.trim() ?? "",
-        occurrence: label ? range.toString().split(label).length - 1 : 0,
-      };
+      const href = link.getAttribute("href")?.trim() ?? "";
+      let occurrence = 0;
+      if (label) {
+        let cursor = labelCursors.get(label);
+        if (!cursor) {
+          cursor = { pos: 0, count: 0 };
+          labelCursors.set(label, cursor);
+        }
+        const at = bodyText.indexOf(label, cursor.pos);
+        if (at >= 0) {
+          occurrence = cursor.count;
+          cursor.pos = at + label.length;
+          cursor.count = occurrence + 1;
+        } else {
+          occurrence = cursor.count;
+        }
+      }
+      return { label, href, occurrence };
     });
     const markdown = replaceLinksWithMarkdown(text, links);
     if (markdown === null) return;
