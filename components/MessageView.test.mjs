@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
+import ts from "typescript";
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
@@ -75,6 +77,39 @@ test("previews the first thinking line and reveals the full text with the saved 
   }
 });
 
+test("renders long expanded thinking in pieces and short thinking as one text node (#1196)", () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { localStorage: { getItem: () => "true" } };
+  const contentOf = (thinking) => {
+    const html = renderToStaticMarkup(React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ThinkingBlock, { block: { type: "thinking", thinking }, blockIndex: 0 }),
+    ));
+    return html.match(/overflow-wrap:anywhere">([\s\S]*)<\/div><\/div>$/)[1];
+  };
+  const piecesOf = (thinking) => {
+    const content = contentOf(thinking);
+    const pieces = [...content.matchAll(/<div>([^<]*)<\/div>/g)].map((match) => match[1]);
+    assert.equal(pieces.map((piece) => `<div>${piece}</div>`).join(""), content);
+    assert.ok(pieces.length > 1);
+    return pieces;
+  };
+  try {
+    assert.equal(contentOf("First <b>line</b>\n\nSecond line."), "First &lt;b&gt;line&lt;/b&gt;\n\nSecond line.");
+
+    // The block boundary stands in for the line break at a cut; a line with
+    // no break is cut with nothing left out.
+    const thinking = "Wait, let me check settings.json again.\n".repeat(2_000);
+    assert.equal(piecesOf(thinking).join("\n"), thinking);
+    const oneLine = "Wait, let me check settings.json again. ".repeat(2_000);
+    assert.equal(piecesOf(oneLine).join(""), oneLine);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 test("shows deferred thinking previews without loading the full content", () => {
   const html = renderMessage({
     role: "assistant",
@@ -82,6 +117,22 @@ test("shows deferred thinking previews without loading the full content", () => 
   });
   assert.match(html, />Historical first line<\/span>/);
   assert.match(html, /aria-expanded="false"/);
+});
+
+test("keys an assistant message's blocks by their place, not the entry id (#1184)", () => {
+  // A message of the running turn gets its entry id when the file is read again.
+  // A block keyed by it remounted then: open thinking closed, a tool output's
+  // scroll went back to the top. ThinkingBlock drops what it loaded for another id.
+  const source = ts.createSourceFile("MessageView.tsx", readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const keys = [];
+  (function visit(node) {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source) === "BlockView") {
+      const key = node.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "key");
+      keys.push(key?.initializer?.expression?.getText(source));
+    }
+    ts.forEachChild(node, visit);
+  })(source);
+  assert.deepEqual(keys, ["originalIndex"]);
 });
 
 test("marks only the matched text block after splitting thinking and the final answer", () => {

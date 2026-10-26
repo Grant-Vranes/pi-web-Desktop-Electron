@@ -304,7 +304,7 @@
      "items": {
       "type": "string"
      },
-     "description": "UTF-8 text files under the session cwd to include with the task.",
+     "description": "UTF-8 text files under the session cwd to include with the task. Together they may fill about a tenth of the subagent model's context window, at most 512 KB. Pass fewer or smaller files, or name the paths in prompt if the subagent can read them.",
      "maxItems": 8
     },
     "description": {
