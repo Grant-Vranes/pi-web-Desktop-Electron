@@ -2223,6 +2223,8 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
           )}
           <a
             href={`${fullOutputUrl}&download=1`}
+            target="_blank"
+            rel="noopener noreferrer"
             style={{ marginLeft: showFullButton ? 10 : 0, color: "var(--accent)", fontSize: 11, textDecoration: "underline" }}
           >
             download full output
