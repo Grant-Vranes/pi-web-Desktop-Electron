@@ -42,6 +42,7 @@ import type { WorktreeState } from "@/lib/worktree-types";
 import type { SettingsSection } from "@/lib/settings-navigation";
 import { getTranscriptNotices, summarizeCacheMisses, type CacheMissSummary } from "@/lib/transcript-notices";
 import { cacheMissSummaryText, TRANSCRIPT_NOTICE_WARNING_COLOR, TranscriptNoticeLines } from "@/components/TranscriptNotices";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
 import {
   captureScrollDistance,
@@ -1364,6 +1365,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 }
                 if (options.showTimestamp !== undefined) showTimestamp = options.showTimestamp;
                 const view = (
+                  <ErrorBoundary key={`${keyPrefix}-view-${messageKey}`} area="message">
                   <MessageView
                     key={`${keyPrefix}-view-${messageKey}`}
                     message={msg}
@@ -1388,6 +1390,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     isCompacting={options.recoverTruncation ? isCompacting : undefined}
                     compactError={options.recoverTruncation ? compactError : undefined}
                   />
+                  </ErrorBoundary>
                 );
                 const noticeLines = notices.length > 0 ? <TranscriptNoticeLines key={`${keyPrefix}-notices-${messageKey}`} notices={notices} /> : null;
                 // One shape with or without notices, so lines arriving on a reload do not remount the view.

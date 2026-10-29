@@ -535,6 +535,28 @@ async function createWindow() {
     },
   });
 
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[pi-web desktop] renderer gone: ${JSON.stringify(details)}`);
+    // A crashed renderer (OOM, GPU loss) leaves a white window with no way
+    // back; reload it so the app recovers and the log keeps the reason.
+    if (details.reason !== "clean-exit") {
+      mainWindow.webContents.reload();
+    }
+  });
+  // Diagnostic escape hatch: Ctrl+Shift+I toggles DevTools (also works in the
+  // packaged app, where there is no View menu).
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type === "keyDown" && input.control && input.shift && input.key.toLowerCase() === "i") {
+      event.preventDefault();
+      if (mainWindow.webContents.isDevToolsOpened()) mainWindow.webContents.closeDevTools();
+      else mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+  // GPU/compositor process loss blanks the window content while the frame
+  // stays; log it so driver-related white screens are diagnosable.
+  app.on("child-process-gone", (_event, details) => {
+    console.error(`[pi-web desktop] child process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);
+  });
   mainWindow.on("close", (event) => {
     if (isQuitting) {
       return;
@@ -547,6 +569,20 @@ async function createWindow() {
   });
 
   await mainWindow.loadURL(URL);
+  // Clicking a same-window link (e.g. an autolinked URL in chat content or a
+  // download link) would navigate the whole app window away and leave it
+  // blank. External targets open in the system browser instead; same-origin
+  // navigations (in-app reloads) stay allowed.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const appOrigin = new URL(URL).origin;
+    if (new URL(url, appOrigin).origin === appOrigin) return;
+    event.preventDefault();
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+  });
   mainWindow.once("ready-to-show", () => {
     showMainWindow();
   });
