@@ -12,7 +12,7 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
   const viewer = file.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "TextFileViewer");
   const calculations = viewer.body.statements.filter((node) =>
     ts.isVariableStatement(node) && node.declarationList.declarations.some((declaration) =>
-      ["isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "useLightweightSource", "lightweightSourceLines"].includes(declaration.name.getText(file)),
+      ["isBinary", "isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "useLightweightSource", "lightweightSourceLines"].includes(declaration.name.getText(file)),
     ),
   ).map((node) => node.getText(file)).join("\n");
   const { outputText } = ts.transpileModule(`
@@ -36,6 +36,9 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
   }
   // A CSV/TSV table previews a loaded prefix too; markdown waits for the whole file.
   assert.equal(render({ ...large, truncated: true }, "preview", false, false, false, "/tmp/data.csv"), null);
+  // A binary file has no Preview, whatever its extension (#1401).
+  assert.equal(render({ ...large, binary: true }, "preview", false, false, false, "/tmp/data.csv").length, 1_001);
+  assert.equal(render({ ...large, language: "html", binary: true }, "preview").length, 1_001);
   assert.equal(render({ ...large, language: "markdown", truncated: true }, "preview").length, 1_001);
   // A partly loaded HTML file previews too: the preview fetches it whole.
   assert.equal(render({ ...large, language: "html", truncated: true, size: 900 * 1024 }, "preview"), null);
@@ -60,6 +63,26 @@ test("dispatches .drawio files to DrawioViewer before the text fallback", () => 
 test("markdown preview links carry PDF page fragments", () => {
   assert.match(source, /parsePdfPageFragment/);
   assert.match(source, /onOpenFile\(linkedFile, parsePdfPageFragment\(href\) \?\? undefined\)/);
+});
+
+test("the diff view wraps when the viewer wraps, and the key reaches the diff", () => {
+  const diffView = source.slice(source.indexOf("function DiffView"), source.indexOf("function ImageViewer"));
+  assert.notEqual(source.indexOf("function DiffView"), -1);
+
+  // Wrapped: the box stops being the widest line's width and the row's text
+  // column gives way instead of pushing a horizontal scrollbar.
+  assert.match(diffView, /width: wrapLines \? "100%" : "max-content"/);
+  assert.match(diffView, /whiteSpace: wrapLines \? "pre-wrap" : "pre"/);
+  assert.match(diffView, /overflowWrap: wrapLines \? "anywhere" : "normal"/);
+  assert.match(diffView, /flexShrink: wrapLines \? 1 : 0/);
+  // Unwrapped stays exactly as before: one line per row, sideways scroll. The
+  // +/- marker column never shrinks either way.
+  assert.match(diffView, /padding: "0 6px",[\s\S]{0,160}flexShrink: 0/);
+  assert.match(source, /<DiffView patch=\{gitDiff\.patch!\} wrapLines=\{wrapLines\} \/>/);
+
+  // The wrap control is offered for the diff as well as the source, never for a
+  // rendered preview (markdown, HTML, table), where there are no lines to wrap.
+  assert.match(source, /\(effectiveDisplayMode === "source" \|\| effectiveDisplayMode === "diff"\) && !isBinary/);
 });
 
 test("partly loaded HTML previews up to the HTML cap; partly loaded markdown does not", () => {
@@ -101,7 +124,7 @@ test("the line-number gutter is pinned only in views of at most SOURCE_HIGHLIGHT
   // the real gutter styles in place.
   const calculations = file.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "TextFileViewer").body.statements.filter((node) =>
     ts.isVariableStatement(node) && node.declarationList.declarations.some((declaration) =>
-      ["isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "useLightweightSource", "lightweightSourceLines", "prismReady", "highlightedSource"].includes(declaration.name.getText(file)),
+      ["isBinary", "isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "useLightweightSource", "lightweightSourceLines", "prismReady", "highlightedSource"].includes(declaration.name.getText(file)),
     ),
   ).map((node) => node.getText(file)).join("\n");
   const { outputText } = ts.transpileModule(`

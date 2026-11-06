@@ -54,6 +54,19 @@ export function setCompatBool<T extends CompatEntry>(entry: T, key: string, valu
   };
 }
 
+/**
+ * Sets a compat flag whose default is off. The entry keeps the key only while
+ * it differs from what the entry inherits (the provider's value, else off), so
+ * switching it back leaves no override behind.
+ */
+export function setCompatFlag<T extends CompatEntry>(entry: T, key: string, value: boolean, inherited = false): T {
+  if (value !== inherited) return setCompatBool(entry, key, value);
+  if (!entry.compat || !Object.prototype.hasOwnProperty.call(entry.compat, key)) return entry;
+  const rest = { ...entry.compat };
+  delete rest[key];
+  return { ...entry, compat: Object.keys(rest).length ? rest : undefined };
+}
+
 export function updateHeaderRow(
   rows: readonly HeaderRow[],
   id: number,
@@ -73,7 +86,7 @@ export function serializeHeaderRows(rows: readonly HeaderRow[]): Record<string, 
 
 /** The parts of models.json the rename tracking needs. */
 export interface ModelsConfigDraft {
-  providers?: Record<string, { models?: { id: string }[] }>;
+  providers?: Record<string, { models?: { id: string; name?: string }[] }>;
 }
 
 /** Snapshot of the model ids models.json holds, by provider and slot. */
@@ -88,6 +101,71 @@ export function trackAddedModels(slots: Map<string, (string | null)[]>, provider
   if (count <= 0) return;
   const existing = slots.get(providerName) ?? [];
   slots.set(providerName, [...existing, ...Array.from({ length: count }, () => null)]);
+}
+
+/** A provider's models in a new order: the draft to set, and the old index now at each slot. */
+export interface ModelOrderChange<T extends ModelsConfigDraft> {
+  config: T;
+  providerName: string;
+  order: number[];
+}
+
+/** Puts a provider's models in `order` and moves its saved slots along; null when nothing moves. */
+function reorderModelEntries<T extends ModelsConfigDraft>(
+  config: T,
+  slots: Map<string, (string | null)[]>,
+  providerName: string,
+  order: number[],
+): ModelOrderChange<T> | null {
+  const providers = config.providers ?? {};
+  const provider = providers[providerName];
+  const models = provider?.models;
+  if (!models || order.every((index, position) => index === position)) return null;
+  const saved = slots.get(providerName);
+  if (saved) slots.set(providerName, order.map((index) => saved[index] ?? null));
+  return {
+    config: {
+      ...config,
+      providers: { ...providers, [providerName]: { ...provider, models: order.map((index) => models[index]) } },
+    },
+    providerName,
+    order,
+  };
+}
+
+/** Moves one model to slot `to` within its provider; mutates `slots` to match. Null when either slot is outside the list. */
+export function moveModelEntry<T extends ModelsConfigDraft>(
+  config: T,
+  slots: Map<string, (string | null)[]>,
+  providerName: string,
+  from: number,
+  to: number,
+): ModelOrderChange<T> | null {
+  const models = config.providers?.[providerName]?.models ?? [];
+  if (from < 0 || from >= models.length || to < 0 || to >= models.length) return null;
+  const order = [...models.keys()];
+  order.splice(from, 1);
+  order.splice(to, 0, from);
+  return reorderModelEntries(config, slots, providerName, order);
+}
+
+/** The slot a model dragged from `from` ends up in when dropped before or after the row at `target`. */
+export function modelDropIndex(from: number, target: number, after: boolean): number {
+  const slot = after ? target + 1 : target;
+  return from < slot ? slot - 1 : slot;
+}
+
+/** Sorts a provider's models once by shown name (natural, case-insensitive, stable); mutates `slots` to match. Null when already sorted. */
+export function sortModelEntries<T extends ModelsConfigDraft>(
+  config: T,
+  slots: Map<string, (string | null)[]>,
+  providerName: string,
+): ModelOrderChange<T> | null {
+  const models = config.providers?.[providerName]?.models ?? [];
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  const order = [...models.keys()].sort((left, right) =>
+    collator.compare(modelSidebarLabel(models[left]), modelSidebarLabel(models[right])));
+  return reorderModelEntries(config, slots, providerName, order);
 }
 
 /**
@@ -130,6 +208,24 @@ export interface ProviderRenameTracking {
 }
 
 /**
+ * Saved provider id that the current draft provider `name` came from, or null
+ * when `name` was added since the last save.
+ *
+ * Once a saved id `from` is in `renames` (`from -> to`), that saved provider
+ * lives at `to`, not at `from`: a provider later given the freed id `from` is
+ * not the original `from`.
+ */
+function savedProviderOf(
+  { renames, savedProviders }: Pick<ProviderRenameTracking, "renames" | "savedProviders">,
+  name: string,
+): string | null {
+  for (const [from, to] of renames) {
+    if (to === name) return from;
+  }
+  return !renames.has(name) && savedProviders.has(name) ? name : null;
+}
+
+/**
  * Moves a provider to a new id, keeping its place in models.json, and records
  * the move so the enabledModels entries can follow it on save.
  *
@@ -148,15 +244,10 @@ export function renameProviderEntry<T extends ModelsConfigDraft>(
   if (oldName === newName) return config;
   if (Object.hasOwn(providers, newName)) return null;
 
-  const { renames, savedProviders, slots } = tracking;
-  let original = oldName;
-  for (const [from, to] of renames) {
-    if (to !== oldName) continue;
-    original = from;
-    break;
-  }
+  const { renames, slots } = tracking;
+  const original = savedProviderOf(tracking, oldName);
   if (original === newName) renames.delete(original);
-  else if (savedProviders.has(original)) renames.set(original, newName);
+  else if (original !== null) renames.set(original, newName);
   const saved = slots.get(oldName);
   if (saved) {
     slots.delete(oldName);
@@ -167,4 +258,46 @@ export function renameProviderEntry<T extends ModelsConfigDraft>(
   const index = entries.findIndex(([name]) => name === oldName);
   entries[index] = [newName, entries[index][1]];
   return { ...config, providers: Object.fromEntries(entries) };
+}
+
+/**
+ * Removes a provider from `config` and forgets any unsaved rename or model-slot
+ * tracking for it, so saving after a rename-then-delete does not rewrite
+ * `enabledModels` to the deleted id or mistake a new provider with the old id
+ * for the deleted one.
+ */
+export function deleteProviderEntry<T extends ModelsConfigDraft>(
+  config: T,
+  tracking: ProviderRenameTracking,
+  name: string,
+): T {
+  const original = savedProviderOf(tracking, name);
+  if (original !== null) {
+    tracking.renames.delete(original);
+    tracking.savedProviders.delete(original);
+  }
+  tracking.slots.delete(name);
+  const providers = { ...(config.providers ?? {}) };
+  delete providers[name];
+  return { ...config, providers };
+}
+
+/** Add provider's search: a provider matches by its id or its shown name, case-insensitive. */
+export function providerMatchesSearch(search: string, id: string, label: string): boolean {
+  const query = search.trim().toLowerCase();
+  return !query || label.toLowerCase().includes(query) || id.toLowerCase().includes(query);
+}
+
+/** Models sidebar: a model shows its models.json name, as the selector does; the id when it has none. */
+export function modelSidebarLabel(model: { id: string; name?: string }): string {
+  return model.name?.trim() || model.id;
+}
+
+/** Models sidebar: a provider shows its models.json name (else the runtime's), as the selector does; the id when it has none. */
+export function providerSidebarLabel(
+  providerId: string,
+  provider: { name?: string },
+  runtimeName?: string,
+): string {
+  return provider.name?.trim() || runtimeName?.trim() || providerId;
 }

@@ -174,6 +174,10 @@
   background: #0891b2;
 }
 
+.session-tree-pinned-dot.is-awaiting {
+  background: #d97706;
+}
+
 /* Session row: title, branch, time; actions take the time's place on
    hover. Hover and selection are a rounded box inset from the sidebar's
    edges, never a full-width band. The title starts in the text column,
@@ -474,8 +478,9 @@ a.session-tree-main {
   white-space: nowrap;
 }
 
-.session-tree .session-tree-confirm-delete,
-.session-tree .session-tree-confirm-cancel {
+/* Also the Agents switcher's side-chat Delete (AgentSessionPanel), outside the tree. */
+.session-tree-confirm-delete,
+.session-tree-confirm-cancel {
   display: flex;
   flex: none;
   align-items: center;
@@ -486,23 +491,24 @@ a.session-tree-main {
   border-radius: 6px;
   font-size: 12px;
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.session-tree .session-tree-confirm-delete {
+.session-tree-confirm-delete {
   border: 1px solid #ef4444;
   background: #ef4444;
   color: #fff;
   font-weight: 600;
 }
 
-.session-tree .session-tree-confirm-cancel {
+.session-tree-confirm-cancel {
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-muted);
   font-weight: 500;
 }
 
-.session-tree .session-tree-confirm-cancel:hover {
+.session-tree-confirm-cancel:hover {
   background: var(--bg-hover);
 }
 
@@ -540,9 +546,9 @@ a.session-tree-main {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
-/* While a group is dragged: its block dimmed in place, the drop line on the
-   edge between two groups (mid-spacer next to the pinned section or the
-   footer), and a ghost with the project's name next to the pointer, placed
+/* While a group is dragged: its block dimmed in place, the drop line in the
+   middle of the spacer it marks (between two groups, next to the pinned
+   section or the footer), and a ghost with the project's name next to the pointer, placed
    clear of the line (hooks/useGroupDrag.ts). */
 .session-tree-drag-source {
   position: absolute;
@@ -654,6 +660,7 @@ a.session-tree-main {
 }
 
 .session-tree-summary-running,
+.session-tree-summary-awaiting,
 .session-tree-summary-unread {
   display: inline-flex;
   align-items: center;
@@ -670,6 +677,10 @@ a.session-tree-main {
   height: 6px;
   border-radius: 50%;
   background: #0891b2;
+}
+
+.session-tree-summary-dot.is-awaiting {
+  background: #d97706;
 }
 
 .session-tree-group-actions {
@@ -742,6 +753,20 @@ a.session-tree-main {
   padding-left: calc(var(--session-tree-inset-left) + 20px);
   color: var(--text-dim);
   font-size: 11px;
+}
+
+/* "No sessions yet" and an unpinned group's "Pin to keep" side by side. */
+.session-tree-group-empty-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tree-group-empty .session-tree-more-toggle {
+  flex: none;
+  margin-left: 14px;
 }
 
 /* "Show more · N" and, once more is shown, "Show less" side by side. A lone
@@ -925,7 +950,7 @@ a.session-tree-main {
   display: flex;
   flex: none;
   align-items: stretch;
-  height: 36px;
+  height: var(--top-bar-height);
   box-sizing: border-box;
   border-bottom: 1px solid var(--border);
 }
@@ -1061,7 +1086,7 @@ a.session-tree-main {
 }
 
 .sidebar-search-toggle {
-  width: 36px;
+  width: var(--top-bar-height);
   padding: 0;
 }
 
@@ -1076,7 +1101,7 @@ a.session-tree-main {
    label is still each one's name. */
 .sidebar-header[data-fit="1"] .sidebar-new-button,
 .sidebar-header[data-fit="2"] .sidebar-new-button {
-  width: 36px;
+  width: var(--top-bar-height);
   padding: 0;
 }
 

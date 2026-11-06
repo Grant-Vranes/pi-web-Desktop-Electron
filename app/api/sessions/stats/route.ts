@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getRpcSession } from "@/lib/rpc-manager";
-import { openSessionManager, resolveSessionPath } from "@/lib/session-reader";
+import { getSessionSettings, openSessionManager, resolveSessionPath } from "@/lib/session-reader";
 import { computeSessionStats, type SessionUsageSummary } from "@/lib/session-stats";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
+import { sideOwnEntries } from "@/lib/side-session";
 import { SESSION_ID_PATTERN } from "@/lib/session-ui-state-shared";
 import type { SessionEntry } from "@/lib/types";
 
@@ -23,6 +24,7 @@ type SessionManagerLike = ReturnType<typeof openSessionManager>;
 interface CachedSummary {
   entryCount: number;
   lastEntryId: string | undefined;
+  leafId: string | null;
   summary: SessionUsageSummary;
 }
 
@@ -44,17 +46,20 @@ async function readSummary(id: string): Promise<SessionUsageSummary | null> {
   }
   const entries = sm.getEntries();
   const lastEntryId = (entries[entries.length - 1] as { id?: string } | undefined)?.id;
+  const leafId = sm.getLeafId();
   const cached = summaries.get(sm);
-  if (cached && cached.entryCount === entries.length && cached.lastEntryId === lastEntryId) return cached.summary;
+  if (cached && cached.entryCount === entries.length && cached.lastEntryId === lastEntryId && cached.leafId === leafId) return cached.summary;
 
-  const stats = computeSessionStats(entries as unknown as SessionEntry[]);
+  const ownEntries = sideOwnEntries(entries);
+  const stats = computeSessionStats(ownEntries as unknown as SessionEntry[]);
   const summary: SessionUsageSummary = {
     tokens: stats.tokens,
     cost: stats.cost,
     toolCalls: stats.toolCalls,
-    totalActiveMs: computeSessionTotalActiveMs(entries),
+    totalActiveMs: computeSessionTotalActiveMs(ownEntries as typeof entries),
+    ...getSessionSettings(entries as unknown as SessionEntry[], leafId),
   };
-  summaries.set(sm, { entryCount: entries.length, lastEntryId, summary });
+  summaries.set(sm, { entryCount: entries.length, lastEntryId, leafId, summary });
   return summary;
 }
 

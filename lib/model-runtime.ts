@@ -1,6 +1,7 @@
 import {
   createAgentSessionServices,
   getAgentDir,
+  SettingsManager,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
@@ -27,6 +28,21 @@ export async function createModelRuntimeWithExtensions(): Promise<ModelRuntime> 
   return services.modelRuntime;
 }
 
+/**
+ * The options pi's TUI passes to `ModelRuntime.login()`. Sign in with ChatGPT
+ * (the `openai` provider's OAuth) refuses to start without this installation's
+ * device ID; pi creates it on first use and keeps it as `deviceId` in the
+ * global settings.json, so the TUI and Pi Web sign in as the same host.
+ * `flush()` waits for that first write.
+ */
+export function createLoginOptions(agentDir = getAgentDir()) {
+  const settingsManager = SettingsManager.create(agentDir, agentDir);
+  return {
+    options: { getDeviceId: () => settingsManager.getOrCreateDeviceId() },
+    flush: () => settingsManager.flush(),
+  };
+}
+
 interface SharedModelRuntime {
   agentDir: string;
   runtime: Promise<ModelRuntime>;
@@ -42,8 +58,10 @@ declare global {
 
 // Pi Web's own plugin changes and reloads invalidate the entry, so the TTL is
 // only a backstop for changes made outside Pi Web: `pi install` from a
-// terminal, an edited extension file.
-const SHARED_MODEL_RUNTIME_TTL_MS = 10 * 60_000;
+// terminal, an edited extension file. A build blocks the event loop while it
+// imports (13 s with 11 extensions, #1465), so this stays rare; `/reload` applies
+// such a change at once.
+const SHARED_MODEL_RUNTIME_TTL_MS = 60 * 60_000;
 const REFRESH_QUEUE_KEY: symbol = Symbol.for("pi-web:shared-model-runtime-refresh");
 
 /**

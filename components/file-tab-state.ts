@@ -56,7 +56,6 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
       page: input.page,
       viewerState: input.modeHint ? {
         displayMode: input.modeHint,
-        wrapLines: false,
         scrollTop: 0,
         scrollLeft: 0,
       } : undefined,
@@ -88,7 +87,9 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
       const nextViewerState: FileViewerState = {
         ...(previousState ?? {}),
         displayMode: input.modeHint,
-        wrapLines: previousState?.wrapLines ?? false,
+        // An explicit wrap choice carries over; an unmade one stays unmade so
+        // the file's own kind still decides in the diff view too.
+        wrapLines: previousState?.wrapLines,
         scrollTop: 0,
         scrollLeft: 0,
       };

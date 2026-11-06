@@ -385,6 +385,81 @@ html.dark {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* The ANSI palette extension output is drawn in (components/AnsiText.tsx): the
+   terminal's light and dark palettes (lib/terminal-theme.ts), by the app's scheme.
+   Extension UI gets pi's theme for a terminal that reports no colors, which
+   paints with these 16 (lib/extension-ui-theme.ts). */
+:root {
+  --ansi-black: #24292f;
+  --ansi-red: #cf222e;
+  --ansi-green: #116329;
+  --ansi-yellow: #7d4e00;
+  --ansi-blue: #0969da;
+  --ansi-magenta: #8250df;
+  --ansi-cyan: #1b7c83;
+  --ansi-white: #6e7781;
+  --ansi-bright-black: #57606a;
+  --ansi-bright-red: #a40e26;
+  --ansi-bright-green: #1a7f37;
+  --ansi-bright-yellow: #633c01;
+  --ansi-bright-blue: #218bff;
+  --ansi-bright-magenta: #a475f9;
+  --ansi-bright-cyan: #3192aa;
+  --ansi-bright-white: #8c959f;
+}
+
+html.dark {
+  --ansi-black: #1d222b;
+  --ansi-red: #f87171;
+  --ansi-green: #4ade80;
+  --ansi-yellow: #facc15;
+  --ansi-blue: #60a5fa;
+  --ansi-magenta: #c084fc;
+  --ansi-cyan: #22d3ee;
+  --ansi-white: #e5e7eb;
+  --ansi-bright-black: #6b7280;
+  --ansi-bright-red: #fca5a5;
+  --ansi-bright-green: #86efac;
+  --ansi-bright-yellow: #fde047;
+  --ansi-bright-blue: #93c5fd;
+  --ansi-bright-magenta: #d8b4fe;
+  --ansi-bright-cyan: #67e8f9;
+  --ansi-bright-white: #ffffff;
+}
+
+.ansi-black-fg { color: var(--ansi-black); }
+.ansi-red-fg { color: var(--ansi-red); }
+.ansi-green-fg { color: var(--ansi-green); }
+.ansi-yellow-fg { color: var(--ansi-yellow); }
+.ansi-blue-fg { color: var(--ansi-blue); }
+.ansi-magenta-fg { color: var(--ansi-magenta); }
+.ansi-cyan-fg { color: var(--ansi-cyan); }
+.ansi-white-fg { color: var(--ansi-white); }
+.ansi-bright-black-fg { color: var(--ansi-bright-black); }
+.ansi-bright-red-fg { color: var(--ansi-bright-red); }
+.ansi-bright-green-fg { color: var(--ansi-bright-green); }
+.ansi-bright-yellow-fg { color: var(--ansi-bright-yellow); }
+.ansi-bright-blue-fg { color: var(--ansi-bright-blue); }
+.ansi-bright-magenta-fg { color: var(--ansi-bright-magenta); }
+.ansi-bright-cyan-fg { color: var(--ansi-bright-cyan); }
+.ansi-bright-white-fg { color: var(--ansi-bright-white); }
+.ansi-black-bg { background-color: var(--ansi-black); }
+.ansi-red-bg { background-color: var(--ansi-red); }
+.ansi-green-bg { background-color: var(--ansi-green); }
+.ansi-yellow-bg { background-color: var(--ansi-yellow); }
+.ansi-blue-bg { background-color: var(--ansi-blue); }
+.ansi-magenta-bg { background-color: var(--ansi-magenta); }
+.ansi-cyan-bg { background-color: var(--ansi-cyan); }
+.ansi-white-bg { background-color: var(--ansi-white); }
+.ansi-bright-black-bg { background-color: var(--ansi-bright-black); }
+.ansi-bright-red-bg { background-color: var(--ansi-bright-red); }
+.ansi-bright-green-bg { background-color: var(--ansi-bright-green); }
+.ansi-bright-yellow-bg { background-color: var(--ansi-bright-yellow); }
+.ansi-bright-blue-bg { background-color: var(--ansi-bright-blue); }
+.ansi-bright-magenta-bg { background-color: var(--ansi-bright-magenta); }
+.ansi-bright-cyan-bg { background-color: var(--ansi-bright-cyan); }
+.ansi-bright-white-bg { background-color: var(--ansi-bright-white); }
+
 /* Scroll-edge fades: a scroller with more content past an edge fades its last
    pixels there, so a cut row or column reads as "more this way". A
    scroll-driven animation sizes each side's fade from the scroll position:
@@ -414,7 +489,6 @@ html.dark {
 @supports (animation-timeline: scroll()) {
   .session-tree-scroll,
   .sidebar-files-scroll,
-  .markdown-code-block > pre,
   .markdown-table-wrap {
     animation-name: scroll-fade-start, scroll-fade-end;
     animation-duration: auto;
@@ -437,8 +511,7 @@ html.dark {
     mask-size: calc(100% - var(--scroll-fade-gutter)) 100%, var(--scroll-fade-gutter) 100%;
     mask-position: left top, right top;
   }
-  /* Code and tables that scroll sideways. */
-  .markdown-code-block > pre,
+  /* Tables that scroll sideways (code fences wrap instead). */
   .markdown-table-wrap {
     --scroll-fade-size: 28px;
     animation-timeline: scroll(self inline);
@@ -829,6 +902,16 @@ html[data-keyboard-open] .terminal-extra-keys {
   }
 }
 
+/* The file panel's tab strip hides its scrollbar: a scrollbar takes its height
+   out of the 36px bar and squeezes the tabs (#1225). A wheel, a swipe or the
+   arrow keys scroll it, and TabBar keeps the active tab in view. */
+.tabbar-scroll {
+  scrollbar-width: none;
+}
+.tabbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 /* The terminal picks its surface apart from the app theme, so --text-dim
    could disappear against it. */
 .terminal-xterm .xterm-viewport::-webkit-scrollbar-thumb {
@@ -1119,6 +1202,21 @@ button.extension-widget-trigger:focus-visible {
   }
 }
 
+/* The chat's top bar, the sidebar's toolbar row and the file panel's tab bar
+   share one height, so they read as one bar. A phone or touch screen gets a
+   finger's 44px; its icon buttons stay square. The file tree's rows
+   (FileExplorer) grow to 36px there, their row buttons with them. */
+:root {
+  --top-bar-height: 36px;
+  --file-row-height: 24px;
+}
+@media (max-width: 640px), (pointer: coarse) {
+  :root {
+    --top-bar-height: 44px;
+    --file-row-height: 36px;
+  }
+}
+
 :root {
   --font-ui-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono-default: var(--font-noto-mono), 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
@@ -1154,6 +1252,10 @@ pre, code {
 }
 .markdown-body p { margin: 0 0 8px; }
 .markdown-body p:last-child { margin-bottom: 0; }
+/* A reply ending in a list, code block or table kept that block's bottom
+   margin, so its stats line sat further down than under a paragraph. */
+.markdown-body > :last-child,
+.markdown-body > :is(ul, ol):last-child > li:last-child { margin-bottom: 0; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
   font-weight: 600;
@@ -1198,6 +1300,28 @@ pre, code {
   display: block;
   max-width: 100%;
   height: auto;
+  margin: 8px 0;
+  border-radius: 6px;
+}
+/* Firefox draws its audio controls without a background (bare buttons on the
+   page), Chrome inside a grey pill: both get the same frame from the theme. */
+.markdown-body audio {
+  display: block;
+  width: min(360px, 100%);
+  height: 36px;
+  margin: 8px 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  clip-path: inset(0 round 18px);
+}
+.markdown-body audio::-webkit-media-controls-enclosure {
+  background: transparent;
+}
+.markdown-body video {
+  display: block;
+  max-width: min(640px, 100%);
+  max-height: 360px;
   margin: 8px 0;
   border-radius: 6px;
 }
@@ -1311,6 +1435,26 @@ pre, code {
 .chat-scaled-text {
   font-size: calc((14px + var(--chat-font-size-offset, 0px)) * var(--chat-font-scale, 1)) !important;
 }
+/* A display formula's Copy button (MarkdownBody's MathDisplay): on hover or
+   keyboard focus where the pointer can hover, always shown on touch screens. */
+.markdown-math-display {
+  position: relative;
+}
+.markdown-math-copy {
+  position: absolute;
+  top: 2px;
+  right: 0;
+}
+@media (hover: hover) {
+  .markdown-math-copy {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  .markdown-math-display:hover .markdown-math-copy,
+  .markdown-math-copy:focus-visible {
+    opacity: 1;
+  }
+}
 .markdown-user-message p {
   white-space: pre-wrap;
 }
@@ -1354,10 +1498,34 @@ pre, code {
   background: var(--bg-hover);
 }
 
+/* The page's mono font ships Latin and Cyrillic only, so arrows, box drawing and
+   blocks fell back to glyphs 12-17px wide in a 7.8px column. These faces take
+   those characters from a system mono font, sized to the 0.6em column. */
+@font-face {
+  font-family: "Terminal Drawing";
+  src: local("Menlo Regular"), local("Menlo-Regular"), local("DejaVu Sans Mono");
+  unicode-range: U+2190-21FF, U+2500-259F;
+  size-adjust: 99.67%;
+}
+@font-face {
+  font-family: "Terminal Drawing Windows";
+  src: local("Consolas");
+  unicode-range: U+2190-21FF, U+2500-259F;
+  size-adjust: 109.09%;
+}
+
+/* Monospace with kept spaces, as an extension's text is laid out for pi's TUI:
+   a status box and its bars only line up in columns. */
 .markdown-custom-message {
+  font-family: "Terminal Drawing", "Terminal Drawing Windows", var(--font-mono);
+  font-size: calc(13px + var(--chat-font-size-offset, 0px));
   line-height: 1.32;
 }
-.markdown-custom-message p { margin: 0; }
+.markdown-custom-message p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.markdown-custom-message p + p { margin-top: 1.32em; }
 .markdown-custom-message h1,
 .markdown-custom-message h2,
 .markdown-custom-message h3,
@@ -1457,6 +1625,25 @@ pre, code {
   background: var(--bg);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 42%, transparent);
 }
+/* Code fences wrap long lines, as pi's TUI does: a line is a row of its number
+   and its text (CodeBlock's renderer), so a wrapped line goes on under its
+   text, and `anywhere` breaks a URL or path that has no space to break at. */
+.markdown-code-line {
+  display: flex;
+}
+/* A zero basis: an `auto` one measures every line's unwrapped width first,
+   which nearly doubled the layout of a reply's fences. */
+.markdown-code-line-text {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* An extension dialog measures its fences unwrapped (ChatWindow), so it still
+   grows to show them whole where the screen allows. */
+.extension-dialog-measuring .markdown-code-line-text {
+  white-space: pre;
+}
 .markdown-code-header {
   padding: 5px 10px;
   background: var(--bg-panel);
@@ -1536,6 +1723,31 @@ pre, code {
 .mermaid-preview-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* A ```svg fence's <img> (components/SvgBlock.tsx). An SVG with neither a
+   viewBox nor a width and height has no size of its own: is-unsized gives it one. */
+.svg-block-image,
+.svg-zoom-image {
+  display: block;
+  height: auto;
+}
+/* An SVG with only a viewBox has a ratio but no size, so it would fill the
+   column: cap its height like a diagram's. */
+.svg-block-image {
+  width: auto;
+  max-width: 100%;
+  max-height: min(360px, 50dvh);
+}
+.svg-block-image.is-unsized {
+  width: 100%;
+  height: 240px;
+}
+.svg-zoom-image {
+  width: 100%;
+}
+.svg-zoom-image.is-unsized {
+  aspect-ratio: 2 / 1;
 }
 
 .image-preview-dialog {
@@ -1759,16 +1971,6 @@ pre, code {
   min-height: 35px;
 }
 
-/* File panel tab strip: too short for a native horizontal scrollbar (it
-   would cover the tab labels), so it is hidden and wheel scrolling maps to
-   horizontal panning in TabBar.tsx. */
-.tab-bar {
-  scrollbar-width: none;
-}
-.tab-bar::-webkit-scrollbar {
-  display: none;
-}
-
 .file-viewer-path {
   flex: 1 1 auto;
   min-width: 48px;
@@ -1881,6 +2083,14 @@ pre, code {
   background: var(--bg-panel);
   box-shadow: 0 3px 12px color-mix(in srgb, var(--text) 18%, transparent);
   pointer-events: auto;
+}
+
+/* Below about 370px the labels of a message's actions push its timestamp onto a
+   second line, and its Copy button past the left edge. Every button keeps its title. */
+@media (max-width: 380px) {
+  .message-action-label {
+    display: none;
+  }
 }
 
 .chat-scroll-to-bottom {
@@ -3635,8 +3845,8 @@ span.token.table {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: var(--top-bar-height);
+  height: var(--top-bar-height);
   padding: 0;
   background: var(--bg-selected);
   border: none;
@@ -3726,6 +3936,18 @@ span.token.table {
   }
   .chat-input-textarea {
     font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
+  }
+}
+
+/* A composer too narrow for the run's button labels, with a panel open beside
+   it: icons only, so the draft keeps the width. A stacked composer has its own
+   row for them and is not a container. */
+.chat-composer-row {
+  container-type: inline-size;
+}
+@container (max-width: 480px) {
+  .chat-composer-run-label {
+    display: none;
   }
 }
 
@@ -3832,8 +4054,13 @@ span.token.table {
    touch screens opt in too; tablets keep their controls because the keyboard
    leaves them enough height. */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
-  html[data-keyboard-open] .chat-input-controls,
   html[data-keyboard-open] .extension-status-shelf {
+    display: none !important;
+  }
+  /* Except while its model picker is open: the picker's filter is the field
+     the keyboard is for, and hiding its row would hide the picker (#1271).
+     Its own rule, so a browser without :has() drops only this one. */
+  html[data-keyboard-open] .chat-input-controls:not(:has(.model-selector [role="listbox"])) {
     display: none !important;
   }
   html[data-keyboard-open] .chat-content {

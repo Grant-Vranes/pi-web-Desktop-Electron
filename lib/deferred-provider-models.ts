@@ -6,7 +6,7 @@ import { resolveVisibleModels, selectInitialModelScope, type InitialModelScopeOp
 type RuntimeModel = Awaited<ReturnType<ModelRuntime["getAvailable"]>>[number];
 
 /**
- * Models of every provider seen in any ModelRuntime of this process, by provider.
+ * Extension provider and virtual models seen in any ModelRuntime of this process, by provider.
  *
  * pi-web builds a runtime per `/api/models` load, and the Models panel's routes share one that
  * `lib/model-runtime.ts` builds again after a plugin change, a reload or its expiry. Some
@@ -18,6 +18,7 @@ type RuntimeModel = Awaited<ReturnType<ModelRuntime["getAvailable"]>>[number];
  */
 declare global {
   var __piWebProviderModelCatalog: Map<string, RuntimeModel[]> | undefined;
+  var __piWebProviderNameCatalog: Map<string, string> | undefined;
 }
 
 function catalog(): Map<string, RuntimeModel[]> {
@@ -25,11 +26,21 @@ function catalog(): Map<string, RuntimeModel[]> {
   return globalThis.__piWebProviderModelCatalog;
 }
 
-/** Record what a runtime offers, so later runtimes can show a provider they have not registered yet. */
+/** Record extension providers and virtual models for runtimes that have not registered them yet. */
 export async function rememberProviderModels(runtime: ModelRuntime): Promise<void> {
+  const extensionProviders = new Set(runtime.getRegisteredProviderIds());
   const byProvider = new Map<string, RuntimeModel[]>();
   for (const model of await runtime.getAvailable()) {
+    // Only current virtual models qualify without a provider registration.
+    // A concurrent refresh may have removed a physical model while availability loaded.
+    if (!extensionProviders.has(model.provider)) {
+      if (!runtime.getModel(model.provider, model.id) || runtime.getPhysicalModel(model.provider, model.id)) continue;
+    }
     byProvider.set(model.provider, [...(byProvider.get(model.provider) ?? []), model]);
+  }
+  globalThis.__piWebProviderNameCatalog ??= new Map();
+  for (const provider of runtime.getProviders?.() ?? []) {
+    if (byProvider.has(provider.id) && provider.name.trim()) globalThis.__piWebProviderNameCatalog.set(provider.id, provider.name.trim());
   }
   const added = [...byProvider.keys()].some((provider) => !catalog().has(provider));
   for (const [provider, models] of byProvider) catalog().set(provider, models);
@@ -45,6 +56,13 @@ export async function rememberProviderModels(runtime: ModelRuntime): Promise<voi
 export function deferredProviderModels(runtime: ModelRuntime): RuntimeModel[] {
   const registered = new Set(runtime.getModels().map((model) => model.provider));
   return [...catalog()].flatMap(([provider, models]) => (registered.has(provider) ? [] : models));
+}
+
+/** Display names by provider id: this runtime's, then a deferred provider's remembered one, so its heading does not flip to the id. */
+export function providerDisplayNames(runtime: ModelRuntime): Map<string, string> {
+  const names = new Map(globalThis.__piWebProviderNameCatalog ?? []);
+  for (const provider of runtime.getProviders()) names.set(provider.id, provider.name.trim() || provider.id);
+  return names;
 }
 
 /** The runtime as a model listing should see it: its own available models plus deferred ones. */
@@ -87,8 +105,7 @@ export async function findDeferredStartupModel(
   try {
     selected = selectInitialModelScope(await resolveVisibleModels(withDeferredProviderModels(runtime), enabledModels), options);
   } catch {
-    // A requested model out of scope, or an entry ambiguous only once deferred models count
-    // (a bare id two providers share).
+    // A requested model out of scope.
     return undefined;
   }
   const model = selected.model && findDeferredModel(runtime, selected.model.provider, selected.model.id);

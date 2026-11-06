@@ -116,6 +116,7 @@ pi-web update [--check] # 更新全局 npm 安装
 | `PI_WEB_PASSWORD` | 启用浏览器密码登录；API 客户端可用用户名 `pi` 的 Basic Auth | 不启用认证 |
 | `PI_WEB_IDLE_TIMEOUT_MS` | 会话空闲超时（毫秒），最大 `2147483647`；`0` 表示不超时；无效或超出范围的值使用默认值 | `600000`（10 分钟） |
 | `PI_WEB_SHUTDOWN_DEADLINE_MS` | 扩展处理 `session_shutdown` 的最长时间（毫秒），超过后会话无论如何都会被释放，最大 `2147483647`；`0`、无效或超出范围的值使用默认值 | `5000`（5 秒） |
+| `PI_CODEMODE_MAX_WORKERS` | pi 同时运行的 codemode 脚本上限，整个服务器（含所有会话与子代理）共享；pi 默认为 `2`，pi-web 在变量未设置或为空时设为 `8`。每个脚本最多可用 256 MB | `8` |
 
 也可以复制 `.env.example` 为 `.env.local` 固定项目本地的端口等默认值；`npm run dev`、`npm run desktop:dev`、`npm run start` 都会读取它，CLI 参数与已导出的环境变量优先。
 
@@ -139,6 +140,40 @@ PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
 ```
 
 密码认证不加密连接，请不要将 Pi Web 以明文 HTTP 暴露到公网；请通过可信反向代理或 VPN 提供 HTTPS。
+
+### Docker
+
+每个版本都会发布镜像到 `ghcr.io/agegr/pi-web`；镜像用法、Compose 示例以及需要保留的数据卷见 [在 Docker 中运行 Pi Web](./docs/docker.md)。
+
+### HTTP 代理（环境变量）
+
+服务端发往模型与 API 的请求遵循标准的 `HTTP_PROXY`、`HTTPS_PROXY` 与 `NO_PROXY` 环境变量。
+
+macOS / Linux：
+
+```bash
+HTTP_PROXY=http://127.0.0.1:7890 \
+HTTPS_PROXY=http://127.0.0.1:7890 \
+NO_PROXY=localhost,127.0.0.1 \
+npx @agegr/pi-web@latest
+```
+
+Windows PowerShell：
+
+```powershell
+$env:HTTP_PROXY = "http://127.0.0.1:7890"
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"
+$env:NO_PROXY = "localhost,127.0.0.1"
+npx @agegr/pi-web@latest
+```
+
+### 说明
+
+- **智能体数据**：Pi Web 默认从 `~/.pi/agent` 读取 pi 数据，包括 `sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl` 下的会话文件；可用 `PI_CODING_AGENT_DIR` 指定其他 pi 智能体目录。
+- **文件系统访问**：Pi Web 需要能读取智能体数据目录，以及会话记录中保存的工作目录。要与 pi 共用已有会话，请在相同的文件系统环境中运行 Pi Web。
+- **共享配置**：模型面板使用 pi 的模型、设置与凭据存储，两边的修改彼此可见；已打开的会话在选择模型后会应用保存后的修改。
+- **文件访问边界**：文件浏览器仅限 Pi Web 中选择过的工作目录，以及它已知的项目或会话根目录，不是通用的文件系统浏览器。
+- **Git worktree**：本分支的 worktree 位于仓库内 `.worktrees/` 下（自动写入 `.gitignore`），上游写法见 [Worktrees in Pi Web](./docs/worktrees.md)。
 
 ## 开发
 
