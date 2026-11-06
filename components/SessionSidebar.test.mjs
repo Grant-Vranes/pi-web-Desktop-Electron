@@ -6,11 +6,20 @@ import ts from "typescript";
 import vm from "node:vm";
 
 const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true });
-const { getSessionListIndices } = await jiti.import("./SessionSidebar.tsx");
+const { getSessionListIndices, sameIdsOr } = await jiti.import("./SessionSidebar.tsx");
 
 const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
 const globalStyles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 const sessionItemSource = source.slice(source.indexOf("function SessionItem("));
+
+/** The source between two anchors: a callback's body, for running it alone. */
+function between(startAnchor, endAnchor) {
+  const start = source.indexOf(startAnchor);
+  const end = source.indexOf(endAnchor, start + startAnchor.length);
+  assert.notEqual(start, -1, `${startAnchor} not found`);
+  assert.notEqual(end, -1, `${endAnchor} not found after ${startAnchor}`);
+  return source.slice(start, end);
+}
 
 test("scrolling keeps the focused session and the viewport mounted without expanding the whole window", () => {
   for (const [scrollTop, focusedIndex] of [[0, 1999], [10000, 0]]) {
@@ -69,13 +78,13 @@ test("subagent completion stays silent and never becomes unread", () => {
   assert.match(source, /completionNotificationSuppressedSessionIds\?: string\[\]/);
   assert.match(
     source,
-    /completedWithNotifications = completedInBackground\.filter\([\s\S]*?!previousSuppressedCompletionSessionIdsRef\.current\.has\(id\)[\s\S]*?!knownSubagentIds\.has\(id\)/,
+    /completedWithNotifications = finishedInBackground\.filter\([\s\S]*?!previousSuppressedCompletionSessionIdsRef\.current\.has\(id\)[\s\S]*?!knownSubagentIds\.has\(id\)/,
   );
   assert.match(source, /completedWithNotifications\.forEach\(\(id\) => next\.add\(id\)\)/);
   assert.match(source, /if \(completedWithNotifications\.length > 0\) \{\s*onBackgroundTaskDone\?\.\(\)/);
   assert.match(
     source,
-    /filter\(\(session\) => session\.relation\?\.kind !== "subagent"\)[\s\S]*?unreadEligibleIds\.has\(id\)/,
+    /filter\(\(session\) => !isHiddenRelation\(session\.relation\)\)[\s\S]*?unreadEligibleIds\.has\(id\)/,
   );
 });
 

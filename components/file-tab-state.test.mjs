@@ -166,7 +166,9 @@ test("explicit diff activation preserves draft and base mtime while resetting sc
   });
   assert.deepEqual(withoutDraft.viewerState, {
     displayMode: "diff",
-    wrapLines: false,
+    // No wrap choice was ever made for b.ts: it stays unmade, so the file's
+    // own kind decides (lib/file-viewer-state.ts, wrapsByDefault).
+    wrapLines: undefined,
     scrollTop: 0,
     scrollLeft: 0,
   });
