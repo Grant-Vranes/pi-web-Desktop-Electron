@@ -21,7 +21,7 @@ import { loadChangesViewMode, saveChangesViewMode, type ChangesViewMode } from "
 import { useI18n } from "@/hooks/useI18n";
 import { collectDroppedUploadEntries, type DroppedUploadEntry } from "@/lib/drop-collect";
 import { openInFileBrowser } from "@/lib/file-browser";
-import { canOpenInHorseMD, openInHorseMD } from "@/lib/horsemd";
+import { canOpenInSoloMD, openInSoloMD } from "@/lib/solomd";
 import type { FileTabMutation } from "./file-tab-state";
 type Translate = ReturnType<typeof useI18n>["t"];
 
@@ -774,12 +774,12 @@ export function TreeNode({
                 {t("files.mention")}
               </button>
             )}
-            {canOpenInHorseMD(node.name, node.isDir) && (
+            {canOpenInSoloMD(node.name, node.isDir) && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void openInHorseMD(node.fullPath).then((result) => {
+                  void openInSoloMD(node.fullPath).then((result) => {
                     if (!result.ok) {
                       window.alert(`${t("files.openInHorseMDFailed")}: ${result.error ?? ""}`);
                     }

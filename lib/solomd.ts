@@ -1,17 +1,17 @@
-/** Result of asking the server to open `path` in the local HorseMD app. */
-export interface OpenInHorseMDResult {
+/** Result of asking the server to open `path` in the local SoloMD app. */
+export interface OpenInSoloMDResult {
   ok: boolean;
   error?: string;
 }
 
 /**
- * Ask the Pi Web server to open `path` with the machine-local HorseMD app
- * (macOS `open -a HorseMD`). Only meaningful for Markdown files; the server
+ * Ask the Pi Web server to open `path` with the machine-local SoloMD app
+ * (macOS `open -a SoloMD`). Only meaningful for Markdown files; the server
  * enforces that. Never throws — callers surface `error` themselves.
  */
-export async function openInHorseMD(path: string): Promise<OpenInHorseMDResult> {
+export async function openInSoloMD(path: string): Promise<OpenInSoloMDResult> {
   try {
-    const response = await fetch("/api/horsemd/open", {
+    const response = await fetch("/api/solomd/open", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path }),
@@ -25,10 +25,10 @@ export async function openInHorseMD(path: string): Promise<OpenInHorseMDResult> 
 }
 
 /**
- * Whether the HorseMD open button should be shown for this entry. Any
+ * Whether the SoloMD open button should be shown for this entry. Any
  * existing file qualifies (code, images, .drawio, .excalidraw, …);
  * directories never do.
  */
-export function canOpenInHorseMD(name: string, isDirectory: boolean): boolean {
+export function canOpenInSoloMD(name: string, isDirectory: boolean): boolean {
   return !isDirectory;
 }
