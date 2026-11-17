@@ -40,6 +40,7 @@ import { filePathFromApiSegments, samePath } from "@/lib/paths";
 import { hasParentDirectorySegment } from "@/lib/path-security";
 import { readTextPreviewChunk } from "@/lib/text-preview";
 import { registerFileWatch } from "@/lib/file-watch-registry";
+import { FILE_WATCH_HEARTBEAT_MS } from "@/lib/file-version";
 import { pageStreamLabel, registerPageStream } from "@/lib/page-stream-registry";
 
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
@@ -296,9 +297,6 @@ export async function POST(
       throw error;
     }
     const files = formData.getAll("files").filter((entry): entry is File => typeof entry !== "string");
-    if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {
-      return NextResponse.json({ error: "Each upload must be 25MB or smaller" }, { status: 413 });
-    }
     if (files.reduce((total, file) => total + file.size, 0) > MAX_UPLOAD_TOTAL_BYTES) {
       return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
     }
@@ -327,7 +325,7 @@ export async function POST(
         readErrors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
       }
     }
-    const { uploaded, skipped, errors: writeErrors } = writeUploadFiles(directory, inputs, inspection, strategy);
+    const { uploaded, skipped, errors: writeErrors } = await writeUploadFiles(directory, inputs, inspection, strategy);
     const errors = [...readErrors, ...writeErrors];
 
     return NextResponse.json(
@@ -425,7 +423,7 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
   }
 
   const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
-  if (!match) {
+  if (!match || (!match[1] && !match[2])) {
     return new Response(null, {
       status: 416,
       headers: {
@@ -686,6 +684,7 @@ export async function GET(
       let lastIno = stat?.ino ?? 0;
       let lastSize = stat?.size ?? 0;
       let lastExists = stat !== undefined;
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
       const stream = new ReadableStream({
         start(controller) {
           const send = (eventName: string, data: Record<string, unknown>) => {
@@ -694,6 +693,7 @@ export async function GET(
               controller.enqueue(new TextEncoder().encode(payload));
             } catch {
               // client disconnected
+              clearInterval(heartbeat);
             }
           };
           try {
@@ -727,6 +727,7 @@ export async function GET(
               }
             });
             watcher.on("error", () => {
+              clearInterval(heartbeat);
               try { watcher?.close(); } catch { /* ignore */ }
               watcher = null;
               releaseWatch?.();
@@ -742,6 +743,7 @@ export async function GET(
             // A client gone without a cancel (a phone off the network) would keep
             // the watcher, and its place in the debug panel's count, forever.
             const onAbort = () => {
+              clearInterval(heartbeat);
               try { watcher?.close(); } catch { /* ignore */ }
               watcher = null;
               releaseWatch?.();
@@ -755,12 +757,14 @@ export async function GET(
             // The client snapshots only after this event, so emit it after the
             // watcher exists to avoid dropping changes between those steps.
             send("connected", { filePath });
+            heartbeat = setInterval(() => send("ping", {}), FILE_WATCH_HEARTBEAT_MS);
           } catch {
             send("error", { message: "Failed to watch file" });
             controller.close();
           }
         },
         cancel() {
+          clearInterval(heartbeat);
           try { watcher?.close(); } catch { /* ignore */ }
           releaseWatch?.();
         },

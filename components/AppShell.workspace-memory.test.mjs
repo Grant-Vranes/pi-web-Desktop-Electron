@@ -491,6 +491,7 @@ test("a new session puts the caret in the fresh composer on desktop only (#1313)
     };
   }
   context.changeFileWorkspace = () => {};
+  context.switchProjectFileTabs = () => {};
   vm.runInContext(stripTypeScriptTypes(`${callbacks}
     globalThis.navigate = { handleNewSession };
   `), context);

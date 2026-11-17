@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession, setRpcSessionTools } from "@/lib/rpc-manager";
 import { cwdMissingBody, missingCwdFromBody } from "@/lib/missing-cwd";
+import { EXTENSION_REPORTED_CODE } from "@/lib/agent-client";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -63,13 +64,15 @@ export async function POST(
   } catch (error) {
     // Read by its fields: the wrapper that threw may come from another route's bundle.
     const missingCwd = missingCwdFromBody(error);
+    const status = (error as { status?: number })?.status;
     return NextResponse.json({
       error: error instanceof Error ? error.message : String(error),
       ...(missingCwd ? cwdMissingBody(missingCwd) : {}),
+      ...((error as { code?: unknown } | null)?.code === EXTENSION_REPORTED_CODE ? { code: EXTENSION_REPORTED_CODE } : {}),
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
-    }, { status: 500 });
+    }, { status: status === 404 ? status : 500 });
   }
 }
 

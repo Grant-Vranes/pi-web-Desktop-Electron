@@ -81,7 +81,7 @@ test("subagent completion stays silent and never becomes unread", () => {
     /completedWithNotifications = finishedInBackground\.filter\([\s\S]*?!previousSuppressedCompletionSessionIdsRef\.current\.has\(id\)[\s\S]*?!knownSubagentIds\.has\(id\)/,
   );
   assert.match(source, /completedWithNotifications\.forEach\(\(id\) => next\.add\(id\)\)/);
-  assert.match(source, /if \(completedWithNotifications\.length > 0\) \{\s*onBackgroundTaskDone\?\.\(\)/);
+  assert.match(source, /if \(completedWithNotifications\.length > 0\) \{[\s\S]*?const since = Date\.now\(\) - 2 \* RUNNING_SESSIONS_POLL_MS;[\s\S]*?onBackgroundTaskDone\?\.\(completedWithNotifications, since\)/);
   assert.match(
     source,
     /filter\(\(session\) => !isHiddenRelation\(session\.relation\)\)[\s\S]*?unreadEligibleIds\.has\(id\)/,

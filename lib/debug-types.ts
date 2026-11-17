@@ -32,8 +32,8 @@ export interface DebugWrapperIdle {
   /** `PI_WEB_IDLE_TIMEOUT_MS` in effect; 0 = disabled (Stop still arms its forced deadline). */
   timeoutMs: number;
   /**
-   * When the idle timer fires next. A check, not a close: a run or an extension's liveness
-   * provider re-arms a full timeout then, unless `forcedByStop`; a page's lease renewal moves it
+   * When the idle timer fires next. A check, not a close: a run, an extension's liveness
+   * provider or a subagent run of this session waiting for its start re-arms a full timeout then, unless `forcedByStop`; a page's lease renewal moves it
    * a full timeout on. Null: not armed.
    */
   nextCheckAt: number | null;
@@ -241,7 +241,7 @@ export type DebugEventStreamState =
 
 /**
  * Why the page closed its stream: "released" (hidden page, #1283), "grace_end" (a non-selected id's
- * grace ran out), "send_failed", "set_tools" (a tool change moved to a new id), "rebuilt" (the
+ * grace ran out, or a fresh composer's get_commands came back), "send_failed", "set_tools" (a tool change moved to a new id), "rebuilt" (the
  * server rebuilt the wrapper), "deselected" (another session was shown), "stuck" (a source never
  * left CONNECTING), "replaced" (a stream for another id took its place).
  */

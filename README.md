@@ -13,7 +13,6 @@
 |                                                              |                                                              |
 
 
-
 ## 本分支的增强
 
 ### 🖥 桌面端（Electron）
@@ -141,6 +140,8 @@ PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
 
 密码认证不加密连接，请不要将 Pi Web 以明文 HTTP 暴露到公网；请通过可信反向代理或 VPN 提供 HTTPS。
 
+With many chats, terminals or file previews active at once, plain HTTP limits the browser to six connections and requests start to wait; see [Serving Pi Web over HTTP/2](./docs/http2.md).
+
 ### Docker
 
 每个版本都会发布镜像到 `ghcr.io/agegr/pi-web`；镜像用法、Compose 示例以及需要保留的数据卷见 [在 Docker 中运行 Pi Web](./docs/docker.md)。
@@ -174,6 +175,7 @@ npx @agegr/pi-web@latest
 - **共享配置**：模型面板使用 pi 的模型、设置与凭据存储，两边的修改彼此可见；已打开的会话在选择模型后会应用保存后的修改。
 - **文件访问边界**：文件浏览器仅限 Pi Web 中选择过的工作目录，以及它已知的项目或会话根目录，不是通用的文件系统浏览器。
 - **Git worktree**：本分支的 worktree 位于仓库内 `.worktrees/` 下（自动写入 `.gitignore`），上游写法见 [Worktrees in Pi Web](./docs/worktrees.md)。
+- **集成钩子**：嵌入 Pi Web 的应用可以替换会话行的上下文菜单，服务端 pi 扩展可以阻止会话空闲关闭，详见 [Integration Hooks](./docs/integrations.md)。
 
 ## 开发
 
@@ -227,6 +229,7 @@ Register once per active extension session and call the returned idempotent
 must be synchronous, cheap, and scoped to the supplied exact session id or
 file. Provider errors fail safe by preserving that session. This lease only
 affects automatic idle eviction; explicit shutdown and Stop fallback cleanup
+Explicit shutdown and Stop fallback cleanup
 still take precedence.
 
 

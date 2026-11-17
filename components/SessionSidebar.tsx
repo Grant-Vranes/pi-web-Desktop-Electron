@@ -161,6 +161,9 @@ export interface SelectSessionOptions {
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean, entryId?: string, blockIndex?: number, options?: SelectSessionOptions) => void;
+  /** A side chat's search hit: its parent opens, then the side chat's tab. The fork's rail
+   *  handles side chats in its own row UI; accepted for shell compatibility. */
+  onSelectSideChat?: (session: SessionInfo) => void;
   onNewSession?: (sessionId: string, cwd: string, projectKey?: string | null, options?: NewSessionOptions) => void;
   /** Imperative control for the shell (the bar above a fresh composer).
    *  The fork sidebar keeps its rail/day-group UI but exposes the same
@@ -194,7 +197,7 @@ interface Props {
   onAtMentions?: (relativePaths: string[]) => void;
   /** Fired when a session that is not currently selected finishes running.
    *  Lets the app play a cross-workspace completion tone. */
-  onBackgroundTaskDone?: () => void;
+  onBackgroundTaskDone?: (sessionIds: string[], since: number) => void;
   /**
    * Sessions that finished while the tab was hidden (#1484): usually the
    * selected one, which `unreadSessionIds` excludes. Counted by the favicon
@@ -604,7 +607,7 @@ export function sameIdsOr(previous: Set<string>, ids: readonly string[]): Set<st
   return previous;
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, hiddenFinishedSessionIds, onRunningSessionIdsChange, onSessionsChange, onRailWidthChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSideChat, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onProjectDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onFileMutation, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, hiddenFinishedSessionIds, onRunningSessionIdsChange, onSessionsChange, onRailWidthChange }: Props) {
   const { t, locale } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [toast, setToast] = useState<SidebarToastData | null>(null);
@@ -1050,7 +1053,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       void loadSessions();
     }
     if (completedWithNotifications.length > 0) {
-      onBackgroundTaskDone?.();
+      // They finished after the poll that last saw them running started. Without one
+      // (the set came from the session list), the last two polls' span stands in.
+      const since = Date.now() - 2 * RUNNING_SESSIONS_POLL_MS;
+      onBackgroundTaskDone?.(completedWithNotifications, since);
     }
 
     previousRunningSessionIdsRef.current = runningSessionIds;
@@ -2121,7 +2127,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       </div>
       <div ref={conversationsListRef} className="sidebar-conversations-list" style={{ flex: "1 1 auto", overflowY: "auto", padding: "0", minHeight: 0 }}>
-      <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} selectedSessionId={selectedSessionId} onSelectSession={handleSelectSessionFromList}>
+      <SessionSearch
+        open={sessionSearchOpen}
+        query={sessionSearchQuery}
+        selectedSessionId={selectedSessionId}
+        onSelectSession={handleSelectSessionFromList}
+        onSelectSideChat={onSelectSideChat ?? ((session) => handleSelectSessionFromList(session))}
+        sessions={allSessions}
+        projectNames={projectAliases}
+      >
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
             {t("sidebar.loading")}

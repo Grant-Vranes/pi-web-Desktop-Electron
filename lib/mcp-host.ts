@@ -21,6 +21,7 @@ import {
   forgetMcpStatus,
   isCurrentMcpStatus,
   mcpStatusKey,
+  onMcpTestConnected,
   recordMcpHostInactive,
   recordMcpStatus,
   replaceMcpStatus,
@@ -427,10 +428,23 @@ class ConnectAttempt {
    */
   readonly declaresTools: boolean;
   /**
+   * Tools the model had loaded from this server (through `tool_search`) when
+   * the idle timer released its previous registration of the same config,
+   * activated again once it is ready. A prompt waits for it like for
+   * `declaresTools`: the model would otherwise lose them until it searched again.
+   */
+  restoreTools: Set<string> | undefined;
+  /**
    * The host let it go (unregistered it, or the session ended): whatever its
    * transports do afterwards is the extension closing them, not news.
    */
   released = false;
+  /**
+   * A test of this very entry connected while this registration read `failed`
+   * (`HostInstance.testConnected()`): the next sync registers it again, though
+   * its entry is unchanged.
+   */
+  retry = false;
   state: AttemptState = "connecting";
   error: string | undefined;
   stderr: string | undefined;
@@ -538,15 +552,28 @@ class HostInstance {
   private idleTimer: NodeJS.Timeout | undefined;
   /** When `idleTimer` fires, for the debug panel; a timer keeps no deadline of its own. */
   private idleDeadline: number | undefined;
+  /**
+   * The `deferred` tools the model had loaded from each server the idle timer
+   * released, with the config they came from; the next registration of that
+   * config takes them (`ConnectAttempt.restoreTools`). A sync drops one whose
+   * entry changed or went.
+   */
+  private readonly loadedTools = new Map<string, { configKey: string; tools: Set<string> }>();
   /** Between agent_start and agent_end; the idle timer never runs meanwhile. */
   private runActive = false;
   /** Prompts waiting in prepareForPrompt(); nor does it run while one waits. */
   private preparing = 0;
+  /** Ends this host's `onMcpTestConnected()` subscription, held from its first session_start to dispose. */
+  private stopListeningTestConnected: (() => void) | undefined;
 
   constructor(private readonly pi: ExtensionAPI, private readonly options: Required<McpHostOptions>) {
     pi.on("session_start", (_event, ctx) => {
       if (this.disposed) return;
       this.ctx = ctx;
+      // From here, never from the constructor: the listeners live on globalThis, and an instance
+      // whose session was never built (its start threw after the extensions loaded) has no wrapper
+      // to dispose it.
+      this.stopListeningTestConnected ??= onMcpTestConnected((entry, configKey) => this.testConnected(entry, configKey));
       // The built-in MCP extension may be switched off (-builtin:mcp) or replaced by one that
       // registers /mcp (several are named mcp:1, mcp:2, …); such an extension would connect
       // these servers its own way, so the host hands it nothing.
@@ -556,7 +583,11 @@ class HostInstance {
       // template named mcp is no owner. Another extension's /mcp only a session can see, by
       // loading the extensions.
       this.reportActivity(ctx, this.active ? undefined : commands[0]?.sourceInfo?.path);
+      this.forgetLoadedTools();
     });
+    // Navigating the tree restores the target branch's loadout from the transcript (the SDK's
+    // `_restoreToolsFromTranscript()`); tools another branch loaded must not come back into it.
+    pi.on("session_tree", () => this.forgetLoadedTools());
     pi.on("before_agent_start", () => {
       this.clearIdle();
       // Prompts that do not come through the wrapper, such as an extension's, still connect.
@@ -629,6 +660,8 @@ class HostInstance {
       // An attempt the host let go still settles, for a prompt still waiting on it; `update()` records nothing for it.
       if (attempt.current !== transport) return;
       if (event.type === "ready") {
+        // Before the update, which lets a waiting prompt go on.
+        if (!attempt.released) this.restoreLoadedTools(entry.name, attempt);
         this.update(attempt, "ready");
       } else if (event.type === "failed") {
         if (event.authRequired) this.update(attempt, "needs-auth");
@@ -650,10 +683,21 @@ class HostInstance {
     const synced = this.enqueue(async () => {
       if (!this.active || !this.ctx) return;
       const desired = this.desiredServers(this.ctx);
+      // Tools loaded from a released server stay remembered only while its entry is unchanged.
+      for (const [name, saved] of [...this.loadedTools]) {
+        const wanted = desired.get(name);
+        if (!wanted || canonicalJson(wanted.config) !== saved.configKey) this.loadedTools.delete(name);
+      }
       for (const [name, attempt] of [...this.attempts]) {
         const wanted = desired.get(name);
-        if (wanted && canonicalJson(wanted.config) === attempt.configKey) continue;
-        await this.unregister(name);
+        const unchanged = wanted !== undefined && canonicalJson(wanted.config) === attempt.configKey;
+        // A test of the unchanged entry connected since it failed here. Not when the extension's
+        // own reconnect got there first: registering again would only hide its tools for a while.
+        const retry = unchanged && attempt.retry && attempt.state === "failed";
+        if (unchanged && !retry) continue;
+        // A registration that failed after it had been ready (a drop, then a reconnect that failed)
+        // still has its tools registered, and the model may have loaded some.
+        await this.unregister(name, { keepLoadedTools: retry });
       }
       for (const [name, wanted] of desired) {
         if (!this.attempts.has(name)) this.register(name, wanted);
@@ -687,7 +731,8 @@ class HostInstance {
     const stopped = aborted(signal);
     await Promise.race([this.sync(), stopped]);
     if (signal.aborted || !wait) return;
-    const connecting = [...this.attempts.values()].filter((attempt) => attempt.declaresTools && !attempt.settled && !attempt.waited);
+    const connecting = [...this.attempts.values()].filter((attempt) =>
+      (attempt.declaresTools || attempt.restoreTools !== undefined) && !attempt.settled && !attempt.waited);
     if (connecting.length === 0) return;
     const deadline = delay(this.options.promptWaitMs);
     const timedOut = await Promise.race([
@@ -698,6 +743,26 @@ class HostInstance {
     deadline.cancel();
     // A server that outlasted one full wait is not waited for again; its tools arrive when it connects.
     if (timedOut) for (const attempt of connecting) attempt.waited = true;
+  }
+
+  /**
+   * A test connected `entry` as it read `configKey` (`onMcpTestConnected()`).
+   * When this session holds that very entry as failed, the same file and the
+   * same content, the server works again and the registration is the only
+   * thing in the way: nothing else retries a failed server whose entry is
+   * unchanged (ADR 0006). The next sync registers it again: now while the
+   * session is idle, else the next prompt's, since a sync applies every pending
+   * `mcp.json` change and would replace other servers in the middle of a run.
+   * `disconnected` is left alone: the extension reconnects it at its next call,
+   * with its tools still registered.
+   */
+  private testConnected(entry: McpStatusEntry, configKey: string): void {
+    if (this.disposed || !this.active) return;
+    const attempt = this.attempts.get(entry.name);
+    if (!attempt || attempt.released || attempt.state !== "failed") return;
+    if (mcpStatusKey(entry) !== mcpStatusKey(attempt.target) || configKey !== attempt.target.configKey) return;
+    attempt.retry = true;
+    if (!this.runActive && this.preparing === 0) void this.sync();
   }
 
   serverStates(): McpHostServerStatus[] {
@@ -737,10 +802,14 @@ class HostInstance {
     };
   }
 
-  /** Unregister everything, for idle and for a host whose session goes away. */
+  /**
+   * Unregister everything when the host idles out. The tools the model loaded
+   * from each server are remembered, since the SDK hides an unregistered
+   * server's tools and does not activate `deferred` ones again when they return.
+   */
   release(): Promise<void> {
     return this.enqueue(async () => {
-      for (const name of [...this.attempts.keys()]) await this.unregister(name);
+      for (const name of [...this.attempts.keys()]) await this.unregister(name, { keepLoadedTools: true });
     });
   }
 
@@ -753,7 +822,10 @@ class HostInstance {
   dispose(): void {
     this.disposed = true;
     this.active = false;
+    this.stopListeningTestConnected?.();
+    this.stopListeningTestConnected = undefined;
     this.clearIdle();
+    this.forgetLoadedTools();
     this.letGoOfAll();
     this.reportActivity(undefined, undefined);
   }
@@ -964,6 +1036,10 @@ class HostInstance {
     const { config, scope, target } = wanted;
     const attempt = new ConnectAttempt(canonicalJson(config), scope, target, config);
     this.attempts.set(name, attempt);
+    // sync() kept them only for this same config.
+    const saved = this.loadedTools.get(name);
+    this.loadedTools.delete(name);
+    if (saved?.configKey === attempt.configKey) attempt.restoreTools = saved.tools;
     try {
       this.pi.registerMcpServer(name, config);
     } catch (error) {
@@ -988,7 +1064,41 @@ class HostInstance {
     }
   }
 
-  private async unregister(name: string): Promise<void> {
+  /**
+   * The server's tools that are `deferred` and active: the ones the model
+   * loaded through `tool_search`. A server's tools carry its name among their
+   * namespace's aliases (the SDK's `registerTools()`); `direct` tools are
+   * activated again on registration anyway.
+   */
+  private loadedToolsOf(server: string, among?: Set<string>): string[] {
+    const active = new Set(this.pi.getActiveTools());
+    return this.pi.getAllTools()
+      .filter((tool) => tool.exposure === "deferred" && (among ? among.has(tool.name) : active.has(tool.name))
+        && tool.namespace?.aliases?.includes(server) === true)
+      .map((tool) => tool.name);
+  }
+
+  /** The remembered loads belong to the branch they were made on. */
+  private forgetLoadedTools(): void {
+    this.loadedTools.clear();
+    for (const attempt of this.attempts.values()) attempt.restoreTools = undefined;
+  }
+
+  /** Activate again the tools remembered for `attempt` that its server still offers, once. */
+  private restoreLoadedTools(server: string, attempt: ConnectAttempt): void {
+    const wanted = attempt.restoreTools;
+    attempt.restoreTools = undefined;
+    if (!wanted || this.disposed) return;
+    try {
+      const active = this.pi.getActiveTools();
+      const missing = this.loadedToolsOf(server, wanted).filter((tool) => !active.includes(tool));
+      if (missing.length > 0) this.pi.setActiveTools([...active, ...missing]);
+    } catch (error) {
+      console.warn(`[pi-web] cannot load MCP server "${server}"'s tools again:`, errorMessage(error));
+    }
+  }
+
+  private async unregister(name: string, options: { keepLoadedTools?: boolean } = {}): Promise<void> {
     const attempt = this.attempts.get(name);
     if (attempt && !attempt.started) {
       const deadline = delay(this.options.replaceWaitMs);
@@ -1002,6 +1112,15 @@ class HostInstance {
     }
     // Before the extension closes it: that close is the host's doing, not a drop.
     if (attempt) this.letGo(attempt);
+    // Before the extension hides the server's tools, which leaves them inactive.
+    if (attempt && options.keepLoadedTools) {
+      try {
+        const tools = new Set([...this.loadedToolsOf(name), ...(attempt.restoreTools ?? [])]);
+        if (tools.size > 0) this.loadedTools.set(name, { configKey: attempt.configKey, tools });
+      } catch (error) {
+        console.warn(`[pi-web] cannot read MCP server "${name}"'s loaded tools:`, errorMessage(error));
+      }
+    }
     try {
       this.pi.unregisterMcpServer(name);
     } catch (error) {

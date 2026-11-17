@@ -5,7 +5,7 @@ import { getGitStatus } from "@/lib/git-changes";
 
 export async function GET(request: NextRequest) {
   try {
-    const cwd = request.nextUrl.searchParams.get("cwd")?.trim() ?? "";
+    const cwd = request.nextUrl.searchParams.get("cwd") ?? "";
     if (!cwd || (!cwd.startsWith("/") && !isWindowsAbsolutePath(cwd))) {
       return NextResponse.json({ error: "cwd must be an absolute path" }, { status: 400 });
     }
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    return NextResponse.json(await getGitStatus(cwd));
+    // A closed request (a newer refresh replaced it) stops its scan.
+    return NextResponse.json(await getGitStatus(cwd, request.signal));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

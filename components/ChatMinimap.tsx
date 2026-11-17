@@ -7,16 +7,16 @@ import {
   markdownPreviewRemarkPlugins,
   normalizeDisplayMath,
 } from "@/lib/markdown";
-import { isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { hasTurnRef, isHiddenCustomMessage, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { loadMinimapPreviewLocked, saveMinimapPreviewLocked } from "@/lib/minimap-preview-lock";
-import type { AgentMessage, AssistantMessage, CustomMessage, TextContent, TurnAnchor, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantMessage, CustomMessage, TextContent, UserMessage } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import styles from "./ChatMinimap.module.css";
+import { LockToggle } from "./LockToggle";
 
 interface Props {
   messages: AgentMessage[];
   entryIds: string[];
-  turnAnchors: TurnAnchor[];
   /** The reply being streamed, read when the turns are measured: it never re-renders the minimap. */
   getStreamingMessage: () => Partial<AgentMessage> | null;
   scrollContainer: RefObject<HTMLDivElement | null>;
@@ -25,6 +25,8 @@ interface Props {
   /** Turns of the branch the server has not sent yet: numbers continue from it (#791). */
   turnsBefore: number;
   onEnsureEntryLoaded: (entryId: string) => Promise<boolean>;
+  /** ChatWindow's getTurnAnchors() over `messages`: the minimap groups and reads refs as it renders. */
+  turnAnchors: readonly boolean[];
 }
 
 const MINIMAP_WIDTH = 36;
@@ -42,7 +44,8 @@ interface AssistantPreview {
 }
 
 interface TurnInfo {
-  entryId: string | null;
+  /** The session entry id of the turn's first message, when known. */
+  entryId?: string | null;
   userMessage: UserMessage | CustomMessage;
   assistantPreviews: AssistantPreview[];
   scrollTop: number | null;
@@ -54,45 +57,6 @@ interface NodeInfo {
   topRatio: number;
   targetTurn: TurnInfo;
   index: number;
-  key: string;
-}
-
-function makePlaceholderTurn(anchor: TurnAnchor): TurnInfo {
-  return {
-    entryId: anchor.entryId,
-    userMessage: { role: "user", content: anchor.preview } as UserMessage,
-    assistantPreviews: [],
-    scrollTop: null,
-    toolCount: 0,
-  };
-}
-
-/** Merge measured turns with the full branch anchor list so turns outside the
- *  loaded message window still get a minimap node. Measured turns win over
- *  their anchor (they carry assistant previews + scroll position); anchors
- *  without a measured turn become placeholders; turns missing from the anchor
- *  list (live streaming tails, legacy sessions) are appended in order. */
-function mergeTurnsWithAnchors(turns: TurnInfo[], anchors: TurnAnchor[]): TurnInfo[] {
-  if (anchors.length === 0) return turns;
-  const turnByEntry = new Map<string, TurnInfo>();
-  for (const turn of turns) {
-    if (turn.entryId && !turnByEntry.has(turn.entryId)) turnByEntry.set(turn.entryId, turn);
-  }
-  const used = new Set<TurnInfo>();
-  const merged: TurnInfo[] = [];
-  for (const anchor of anchors) {
-    const turn = turnByEntry.get(anchor.entryId);
-    if (turn) {
-      used.add(turn);
-      merged.push(turn);
-    } else {
-      merged.push(makePlaceholderTurn(anchor));
-    }
-  }
-  for (const turn of turns) {
-    if (!used.has(turn)) merged.push(turn);
-  }
-  return merged;
 }
 
 function getUserPreview(message: UserMessage | CustomMessage): string {
@@ -253,7 +217,6 @@ function createTurnNodes(turns: TurnInfo[]): NodeInfo[] {
     topRatio: 0,
     targetTurn: turn,
     index,
-    key: turn.entryId ?? `turn-${index}`,
   }));
 }
 
@@ -293,17 +256,16 @@ function layoutNodes(allNodes: NodeInfo[], minimapHeight: number): NodeLayout {
 export const ChatMinimap = memo(function ChatMinimap({
   messages,
   entryIds,
-  turnAnchors,
   getStreamingMessage,
   scrollContainer,
   messageRefs,
   onRevealHistory,
   turnsBefore,
   onEnsureEntryLoaded,
+  turnAnchors,
 }: Props) {
   const { t } = useI18n();
   const [visible, setVisible] = useState(false);
-  const [hasMounted, setHasMounted] = useState(false);
   const [allNodes, setAllNodes] = useState<NodeInfo[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [minimapHeight, setMinimapHeight] = useState(600);
@@ -334,11 +296,11 @@ export const ChatMinimap = memo(function ChatMinimap({
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const turnAnchorsRef = useRef(turnAnchors);
+  turnAnchorsRef.current = turnAnchors;
 
   const entryIdsRef = useRef(entryIds);
   entryIdsRef.current = entryIds;
-  const turnAnchorsRef = useRef(turnAnchors);
-  turnAnchorsRef.current = turnAnchors;
 
   const nodeLayout = useMemo(
     () => layoutNodes(allNodes, minimapHeight),
@@ -403,22 +365,25 @@ export const ChatMinimap = memo(function ChatMinimap({
       let currentTurn: TurnInfo | null = null;
 
       const streamingMessage = getStreamingMessage();
-      const allCurrent: (AgentMessage | Partial<AgentMessage>)[] = streamingMessage
+      const allMessages: (AgentMessage | Partial<AgentMessage>)[] = streamingMessage
         ? [...messagesRef.current, streamingMessage]
         : messagesRef.current;
-      const currentEntryIds = entryIdsRef.current;
-      for (let messageIndex = 0; messageIndex < allCurrent.length; messageIndex++) {
-        const message = allCurrent[messageIndex];
-        const isAnchor = isMessageGroupAnchor(message);
+      for (const [messageIdx, message] of allMessages.entries()) {
+        // The streaming reply, past `messages`, is never an anchor.
+        const isAnchor = turnAnchorsRef.current[messageIdx] === true;
         if (!isAnchor && message.role !== "assistant") continue;
-        const element = refs?.[refIndex];
-        refIndex++;
+        // ChatWindow's refs, in the same order: a hidden anchor renders nothing and has none.
+        let element: HTMLDivElement | null = null;
+        if (hasTurnRef(message, isAnchor)) {
+          element = refs?.[refIndex] ?? null;
+          refIndex++;
+        }
 
         if (isAnchor) {
           currentTurn = null;
           const elementRect = element?.getBoundingClientRect();
           currentTurn = {
-            entryId: currentEntryIds[messageIndex] ?? null,
+            entryId: entryIdsRef.current[messageIdx] ?? null,
             userMessage: message as UserMessage | CustomMessage,
             assistantPreviews: [],
             scrollTop: elementRect
@@ -431,6 +396,10 @@ export const ChatMinimap = memo(function ChatMinimap({
         }
 
         if (!currentTurn) continue;
+        // A turn a hidden message opened starts where its first reply shows.
+        if (currentTurn.scrollTop === null && element && isHiddenCustomMessage(currentTurn.userMessage)) {
+          currentTurn.scrollTop = element.getBoundingClientRect().top - containerRect.top + scrollEl.scrollTop;
+        }
         currentTurn.toolCount += countToolCalls(message);
         const answerMarkdown = getAssistantAnswerMarkdown(message);
         if (answerMarkdown) {
@@ -441,7 +410,7 @@ export const ChatMinimap = memo(function ChatMinimap({
         }
       }
 
-      const nextNodes = createTurnNodes(mergeTurnsWithAnchors(turns, turnAnchorsRef.current));
+      const nextNodes = createTurnNodes(turns);
       setMinimapHeight(minimapEl.clientHeight);
       allNodesRef.current = nextNodes;
       setAllNodes(nextNodes);
@@ -523,7 +492,7 @@ export const ChatMinimap = memo(function ChatMinimap({
       updateScroll();
     }, 50);
     return () => clearTimeout(timeout);
-  }, [messages.length, turnAnchors.length, measureNodes, updateScroll]);
+  }, [messages.length, turnAnchors, measureNodes, updateScroll]);
 
   const scrollToNode = useCallback((node: NodeInfo, behavior: ScrollBehavior) => {
     const scrollEl = scrollContainer.current;
@@ -658,10 +627,6 @@ export const ChatMinimap = memo(function ChatMinimap({
 
   useEffect(() => () => cancelPreviewHide(), [cancelPreviewHide]);
 
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
-
   const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!visible) return;
 
@@ -692,7 +657,6 @@ export const ChatMinimap = memo(function ChatMinimap({
     window.addEventListener("mouseup", onUp);
   }, [findNearestNode, scrollToNode, showPreview, visible]);
 
-  const isPreviewOpen = minimapHovered;
   const nearestNode = mouseYRatio === null ? null : findNearestNode(mouseYRatio);
   const nearestNodeIndex = nearestNode?.index ?? null;
 
@@ -706,169 +670,146 @@ export const ChatMinimap = memo(function ChatMinimap({
     previewBox.scrollTop = Math.max(0, targetTop);
   }, [allNodes, minimapHovered, nearestNodeIndex]);
 
-  if (!hasMounted || !visible) return null;
+  if (!visible) return null;
 
   const lastNodeTop = positionedNodes.length > 0
     ? positionedNodes[positionedNodes.length - 1].topRatio * minimapHeight
     : MINIMAP_PADDING;
   const railHeight = Math.max(1, lastNodeTop - MINIMAP_PADDING);
-  const previewBody = allNodes.length > 0 && (
-    <>
-      {allNodes.map((node) => {
-        const isLocated = nearestNodeIndex === node.index;
+
+  return (
+    <div
+      ref={containerRef}
+      onMouseDown={handleMouseDown}
+      onMouseEnter={showPreview}
+      onMouseLeave={schedulePreviewHide}
+      onMouseMove={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setMouseYRatio((event.clientY - rect.top) / rect.height);
+      }}
+      style={{
+        width: MINIMAP_WIDTH,
+        flexShrink: 0,
+        position: "relative",
+        cursor: "pointer",
+        userSelect: "none",
+        borderLeft: "1px solid var(--border)",
+        background: "var(--bg-panel)",
+        overflow: "visible",
+      }}
+    >
+      {turnsBefore > 0 && (
+        <div
+          data-minimap-earlier=""
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 0,
+            height: MINIMAP_PADDING,
+            width: 1,
+            background: "repeating-linear-gradient(to bottom, var(--text-dim) 0 2px, transparent 2px 4px)",
+            transform: "translateX(-50%)",
+            zIndex: 0,
+          }}
+        />
+      )}
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: MINIMAP_PADDING,
+          height: railHeight,
+          width: 1,
+          background: "var(--border)",
+          transform: "translateX(-50%)",
+          zIndex: 0,
+        }}
+      />
+
+      {positionedNodes.map((node) => {
+        const isNearest = minimapHovered && nearestNode?.index === node.index;
+        const isActive = activeIndex === node.index;
+
         return (
           <div
-            key={node.key}
-            ref={(element) => {
-              if (element) previewItemRefs.current.set(node.index, element);
-              else previewItemRefs.current.delete(node.index);
+            key={node.index}
+            data-minimap-node-index={node.index}
+            data-minimap-node-active={isActive ? "" : undefined}
+            style={{
+              position: "absolute",
+              top: `${node.topRatio * 100}%`,
+              transform: "translateY(-50%)",
+              left: 0,
+              right: 0,
+              height: Math.max(1, nodeGap),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+              zIndex: 2,
             }}
-            className={styles.turn}
-            data-minimap-preview-index={node.index}
-            data-located={isLocated ? "true" : undefined}
           >
-            <span className={styles.number}>
-              <span aria-hidden="true">
-                {String(turnsBefore + node.index + 1).padStart(2, "0")}
-              </span>
-              {node.targetTurn.toolCount > 0 && (
-                <span
-                  className={styles.toolBadge}
-                  role="img"
-                  title={t("chatMinimap.toolCalls", { count: node.targetTurn.toolCount })}
-                  aria-label={t("chatMinimap.toolCalls", { count: node.targetTurn.toolCount })}
-                >
-                  {node.targetTurn.toolCount > 99 ? "99+" : node.targetTurn.toolCount}
-                </span>
-              )}
-            </span>
-            <div className={styles.content}>
-              <button
-                type="button"
-                className={styles.user}
-                data-minimap-preview-user={node.index}
-                onClick={() => {
-                  scrollToNode(node, "smooth");
-                }}
-              >
-                <span className={styles.userText}>
-                  {getUserPreview(node.targetTurn.userMessage)}
-                </span>
-              </button>
-
-              {node.targetTurn.assistantPreviews.map((assistant, assistantIndex) => (
-                <div
-                  key={assistantIndex}
-                  className={styles.assistant}
-                >
-                  <button
-                    type="button"
-                    className={styles.assistantJump}
-                    data-minimap-preview-assistant={`${node.index}-${assistantIndex}`}
-                    onClick={() => scrollToAssistant(node, assistantIndex)}
-                    aria-label={t("chatMinimap.locateAssistant")}
-                    title={t("chatMinimap.locateAssistant")}
-                  >
-                    A
-                  </button>
-                  <AssistantOutline
-                    markdown={assistant.markdown}
-                    onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
-                    onHeadingClick={(headingIndex) => (
-                      scrollToHeading(node, assistantIndex, headingIndex)
-                    )}
-                  />
-                </div>
-              ))}
-            </div>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 2,
+                background: isActive ? "rgba(128,128,128,0.42)" : "rgba(128,128,128,0.16)",
+                border: `1.5px solid ${isActive ? "rgba(128,128,128,0.95)" : "rgba(128,128,128,0.58)"}`,
+                boxShadow: isActive ? "0 0 0 2px var(--bg-panel)" : "none",
+                transition: "transform 0.1s, background 0.1s",
+                transform: isNearest ? "scale(1.25)" : "scale(1)",
+              }}
+            />
           </div>
         );
       })}
-    </>
-  );
 
-  return (
-    <>
-      <div
-        style={{
-          width: MINIMAP_WIDTH,
-          flexShrink: 0,
-          position: "relative",
-          cursor: "pointer",
-          userSelect: "none",
-          borderLeft: "1px solid var(--border)",
-          background: "var(--bg-panel)",
-          overflow: "visible",
-          display: "flex",
-          flexDirection: "column",
+      <LockToggle
+        locked={locked}
+        className={styles.lock}
+        data-minimap-lock={locked ? "on" : "off"}
+        title={t(locked ? "chatMinimap.unlockPreview" : "chatMinimap.lockPreview")}
+        aria-label={t("chatMinimap.lockPreview")}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          toggleLock();
         }}
-      >
+      />
+
+      {minimapHovered && allNodes.length > 0 && (
         <div
-          ref={containerRef}
-          onMouseDown={handleMouseDown}
+          ref={previewBoxRef}
+          className={styles.preview}
+          data-minimap-preview-box=""
           onMouseEnter={showPreview}
-          onMouseLeave={schedulePreviewHide}
-          onMouseMove={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            setMouseYRatio((event.clientY - rect.top) / rect.height);
-          }}
-          style={{
-            position: "relative",
-            flex: 1,
-            minHeight: 0,
-            overflow: "visible",
-          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onMouseMove={(event) => event.stopPropagation()}
         >
           {turnsBefore > 0 && (
-            <div
-              data-minimap-earlier=""
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: 0,
-                height: MINIMAP_PADDING,
-                width: 1,
-                background: "repeating-linear-gradient(to bottom, var(--text-dim) 0 2px, transparent 2px 4px)",
-                transform: "translateX(-50%)",
-                zIndex: 0,
-              }}
-            />
+            <button
+              type="button"
+              className={styles.earlier}
+              data-minimap-preview-earlier=""
+              // The chat's top sentinel pages the older history in.
+              onClick={() => scrollContainer.current?.scrollTo({ top: 0, behavior: "smooth" })}
+            >
+              {t("chatMinimap.earlierTurns", { count: turnsBefore })}
+            </button>
           )}
-          <div
-            style={{
-              position: "absolute",
-              left: "50%",
-              top: MINIMAP_PADDING,
-              height: railHeight,
-              width: 1,
-              background: "var(--border)",
-              transform: "translateX(-50%)",
-              zIndex: 0,
-            }}
-          />
-
-          {positionedNodes.map((node) => {
-            const isNearest = minimapHovered && nearestNode?.index === node.index;
-            const isActive = activeIndex === node.index;
-
+          {allNodes.map((node) => {
+            const isLocated = nearestNodeIndex === node.index;
             return (
               <div
-                key={node.key}
-                data-minimap-node-index={node.index}
-                data-minimap-node-active={isActive ? "" : undefined}
-                style={{
-                  position: "absolute",
-                  top: `${node.topRatio * 100}%`,
-                  transform: "translateY(-50%)",
-                  left: 0,
-                  right: 0,
-                  height: Math.max(1, nodeGap),
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  pointerEvents: "none",
-                  zIndex: 2,
+                key={node.index}
+                ref={(element) => {
+                  if (element) previewItemRefs.current.set(node.index, element);
+                  else previewItemRefs.current.delete(node.index);
                 }}
+                className={styles.turn}
+                data-minimap-preview-index={node.index}
+                data-located={isLocated ? "true" : undefined}
               >
                 <span className={styles.number}>
                   <span aria-hidden="true">
@@ -885,70 +826,53 @@ export const ChatMinimap = memo(function ChatMinimap({
                     </span>
                   )}
                 </span>
+                <div className={styles.content}>
+                  <button
+                    type="button"
+                    className={styles.user}
+                    data-minimap-preview-user={node.index}
+                    onClick={() => {
+                      scrollToNode(node, "smooth");
+                    }}
+                  >
+                    <span className={styles.userText}>
+                      {isHiddenCustomMessage(node.targetTurn.userMessage)
+                        ? t("chatMinimap.extensionTurn", { type: (node.targetTurn.userMessage as CustomMessage).customType })
+                        : getUserPreview(node.targetTurn.userMessage)}
+                    </span>
+                  </button>
+
+                  {node.targetTurn.assistantPreviews.map((assistant, assistantIndex) => (
+                    <div
+                      key={assistantIndex}
+                      className={styles.assistant}
+                    >
+                      <button
+                        type="button"
+                        className={styles.assistantJump}
+                        data-minimap-preview-assistant={`${node.index}-${assistantIndex}`}
+                        onClick={() => scrollToAssistant(node, assistantIndex)}
+                        aria-label={t("chatMinimap.locateAssistant")}
+                        title={t("chatMinimap.locateAssistant")}
+                      >
+                        A
+                      </button>
+                      <AssistantOutline
+                        markdown={assistant.markdown}
+                        onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
+                        onHeadingClick={(headingIndex) => (
+                          scrollToHeading(node, assistantIndex, headingIndex)
+                        )}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           })}
-
-          <button
-            type="button"
-            className={styles.lock}
-            data-minimap-lock={locked ? "on" : "off"}
-            aria-pressed={locked}
-            title={t(locked ? "chatMinimap.unlockPreview" : "chatMinimap.lockPreview")}
-            aria-label={t("chatMinimap.lockPreview")}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleLock();
-            }}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="4" y="11" width="16" height="10" rx="2" />
-              {locked ? (
-                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-              ) : (
-                <path d="M8 11V7a4 4 0 0 1 7.9-.9" />
-              )}
-            </svg>
-          </button>
         </div>
-
-        {isPreviewOpen && previewBody && (
-          <div
-            ref={previewBoxRef}
-            className={styles.preview}
-            data-minimap-preview-box=""
-            onMouseEnter={showPreview}
-            onMouseLeave={schedulePreviewHide}
-            onMouseDown={(event) => event.stopPropagation()}
-            onMouseMove={(event) => event.stopPropagation()}
-          >
-            {turnsBefore > 0 && (
-              <button
-                type="button"
-                className={styles.earlier}
-                data-minimap-preview-earlier=""
-                // The chat's top sentinel pages the older history in.
-                onClick={() => scrollContainer.current?.scrollTo({ top: 0, behavior: "smooth" })}
-              >
-                {t("chatMinimap.earlierTurns", { count: turnsBefore })}
-              </button>
-            )}
-            {previewBody}
-          </div>
-        )}
-      </div>
-    </>
+      )}
+    </div>
   );
 });
 

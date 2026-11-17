@@ -114,6 +114,12 @@ interface Props {
   onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
   slashCommandsLoading?: boolean;
+  /**
+   * An extension's dialog or panel is open over the chat. Its layer sits under the composer's
+   * menus, so the history, `/` and `@` menus hide meanwhile and come back once it closes: typing
+   * `/` in a fresh composer is what shows a dialog session_start asks (#1678).
+   */
+  extensionUiOpen?: boolean;
   onLoadSlashCommands?: () => Promise<SlashCommandInfo[]> | SlashCommandInfo[];
   onBuiltinCommand?: (message: string) => Promise<BuiltinSlashCommandResult>;
   soundEnabled?: boolean;
@@ -128,6 +134,10 @@ interface Props {
 
 export interface ChatInputHandle {
   insertText: (text: string) => void;
+  /** An extension's `setEditorText()`: the draft becomes `text`, as pi's editor `setText()` does (undoable). */
+  setText: (text: string) => void;
+  /** An extension's `pasteToEditor()`: `text` at the caret as typed, like a paste. */
+  pasteText: (text: string) => void;
   /** Insert at the caret as a paragraph of its own: a blockquote must start a line. */
   insertQuote: (text: string) => void;
   insertIfEmpty: (text: string) => void;
@@ -242,11 +252,30 @@ export function replaceLinksWithMarkdown(
  * placeholder counts toward scrollHeight too, so an empty box would grow to
  * its own hint's lines. Only typed text scrolls, so a placeholder that
  * overflows the box stays cut off instead of showing a scrollbar.
+ *
+ * The "auto" step clamps scrollTop to 0, so the scroll the browser gave the
+ * caret is captured first and restored last.
  */
 export function autoGrowTextarea(ta: HTMLTextAreaElement): void {
+  // The "auto" step fits the whole text, which clamps scrollTop to 0; keep the
+  // scroll the browser gave the caret (typing at the end had already scrolled
+  // it into view), or the capped height hides the caret again.
+  const scrollTop = ta.scrollTop;
   ta.style.height = "auto";
   ta.style.height = `${ta.value ? Math.min(ta.scrollHeight, 200) : ta.clientHeight}px`;
   ta.style.overflowY = ta.value && ta.scrollHeight > ta.clientHeight ? "auto" : "hidden";
+  ta.scrollTop = scrollTop;
+}
+
+/**
+ * A programmatic value change (history restore, draft restore, follow-up
+ * prepend, pasted markdown) moves the caret without a native edit, so nothing
+ * scrolls it into view. A textarea cannot report its caret's pixel position,
+ * so only the common case is handled: a caret at the very end scrolls an
+ * overflowing box to its bottom.
+ */
+export function scrollTextareaCaretIntoView(ta: HTMLTextAreaElement): void {
+  if (ta.selectionEnd === ta.value.length) ta.scrollTop = ta.scrollHeight;
 }
 
 function getVisibleTopBoundary(element: HTMLElement): number {
@@ -714,6 +743,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
+  extensionUiOpen = false,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
   onPromptWithStreamingBehavior,
@@ -751,6 +781,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
   const [builtinCommandPending, setBuiltinCommandPending] = useState(false);
   const builtinCommandPendingRef = useRef(false);
+  const builtinCommandFocusRef = useRef<HTMLTextAreaElement | null>(null);
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
@@ -787,6 +818,32 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   attachedImagesRef.current = attachedImages;
 
   useImperativeHandle(ref, () => ({
+    setText(text: string) {
+      const ta = textareaRef.current;
+      if (!ta) {
+        valueRef.current = text;
+        setValue(text);
+        return;
+      }
+      // Selected whole, the draft goes in one undoable insert; a collapsed caret
+      // would delete it character by character.
+      ta.setSelectionRange(0, ta.value.length);
+      replaceTextareaRange(ta, 0, ta.value.length, text);
+      setAtQuery(null);
+      requestAnimationFrame(() => autoGrowTextarea(ta));
+    },
+    pasteText(text: string) {
+      // An empty paste inserts nothing, as in the TUI; over a selection it would delete it.
+      if (!text) return;
+      const ta = textareaRef.current;
+      if (!ta) {
+        setValue((v) => v + text);
+        return;
+      }
+      replaceTextareaRange(ta, ta.selectionStart ?? ta.value.length, ta.selectionEnd ?? ta.value.length, text);
+      setAtQuery(null);
+      requestAnimationFrame(() => autoGrowTextarea(ta));
+    },
     insertIfEmpty(text: string) {
       const ta = textareaRef.current;
       const current = ta ? ta.value : value;
@@ -798,6 +855,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         if (!ta) return;
         ta.focus();
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     replaceMessage(message: UserMessage) {
@@ -820,6 +878,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         if (!ta) return;
         ta.focus();
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     prependText(text: string) {
@@ -837,6 +896,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         ta.focus();
         ta.setSelectionRange(combined.length, combined.length);
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     rekeyDraft(previousKey: string, nextKey: string) {
@@ -932,6 +992,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         ta.focus();
         ta.setSelectionRange(ta.value.length, ta.value.length);
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     // The caret goes after a draft that came back, so typing continues it.
@@ -1099,9 +1160,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const resizeTextarea = useCallback(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = "auto";
     if (ta.value) autoGrowTextarea(ta);
-    else ta.style.overflowY = "hidden";
+    else {
+      ta.style.height = "auto";
+      ta.style.overflowY = "hidden";
+    }
   }, []);
 
   useLayoutEffect(resizeTextarea, [value, fontSize, uiFontFamily, uiWeight, resizeTextarea]);
@@ -1145,9 +1208,28 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (builtinCommandPending) {
+      const cancelRestore = (event: PointerEvent) => {
+        if (event.target !== builtinCommandFocusRef.current) builtinCommandFocusRef.current = null;
+      };
+      document.addEventListener("pointerdown", cancelRestore, true);
+      return () => document.removeEventListener("pointerdown", cancelRestore, true);
+    }
+    const textarea = builtinCommandFocusRef.current;
+    builtinCommandFocusRef.current = null;
+    // Disabling the fieldset blurs its editor. Wait for the enabling commit,
+    // and leave focus alone if the command or the user moved it elsewhere.
+    if (textarea?.isConnected && document.activeElement === document.body
+      && !document.querySelector('[aria-modal="true"]')) {
+      textarea.focus({ preventScroll: true });
+    }
+  }, [builtinCommandPending]);
+
   const runBuiltinCommand = useCallback(async (msg: string): Promise<boolean> => {
     if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand) return false;
     if (builtinCommandPendingRef.current) return true;
+    builtinCommandFocusRef.current = document.activeElement === textareaRef.current ? textareaRef.current : null;
     builtinCommandPendingRef.current = true;
     setBuiltinCommandPending(true);
     try {
@@ -1167,7 +1249,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     onAudioUnlock?.();
     const builtinAllowed = !isStreaming || offersBuiltinSlashCommandWhileStreaming(msg);
     if (builtinAllowed && await runBuiltinCommand(msg)) return;
-    if (isStreaming) return;
+    // A `!` command runs beside the run, as in pi's TUI; anything else queues.
+    if (isStreaming && !(msg.startsWith("!") && !attachedImages.length)) return;
     clearInput();
     onSend(msg, attachedImages.length ? attachedImages : undefined);
   }, [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
@@ -1341,9 +1424,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [inputHistory.length]);
 
   useEffect(() => {
-    if (!historyMenuOpen) return;
+    if (!historyMenuOpen || extensionUiOpen) return;
     historyItemRefs.current[historyActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [historyActiveIndex, historyMenuOpen]);
+  }, [historyActiveIndex, historyMenuOpen, extensionUiOpen]);
 
   const applyHistoryInput = useCallback((text: string) => {
     setValue(text);
@@ -1356,6 +1439,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       ta.focus();
       ta.setSelectionRange(text.length, text.length);
       autoGrowTextarea(ta);
+      scrollTextareaCaretIntoView(ta);
     });
   }, []);
 
@@ -1383,6 +1467,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
+    if (msg.startsWith("!") && !attachedImages.length) {
+      // A shell command is never steered into the run as text.
+      void handleSend();
+      return;
+    }
     onAudioUnlock?.();
     const images = attachedImages.length ? attachedImages : undefined;
     const queue = () => {
@@ -1412,7 +1501,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       return;
     }
     queue();
-  }, [value, attachedImages, onBuiltinCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, runBuiltinCommand]);
+  }, [value, attachedImages, onBuiltinCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, runBuiltinCommand, handleSend]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = displayedSlashCommands.length - 1;
@@ -1479,7 +1568,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         return;
       }
 
-      if (historyMenuOpen && !isComposing) {
+      if (historyMenuOpen && !extensionUiOpen && !isComposing) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setHistoryActiveIndex((i) => Math.min(Math.max(0, inputHistory.length - 1), i + 1));
@@ -1502,7 +1591,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         }
       }
 
-      if (slashMenuOpen && slashQuery !== null) {
+      if (slashMenuOpen && slashQuery !== null && !extensionUiOpen) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setSlashActiveIndex(getNextSlashIndex("down"));
@@ -1548,7 +1637,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
       // @ file menu — skip while composing so IME candidate navigation
       // (arrows/Enter/Tab) is never intercepted.
-      if (atMenuOpen && atQuery !== null && !isComposing) {
+      if (atMenuOpen && atQuery !== null && !extensionUiOpen && !isComposing) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setAtActiveIndex((i) => cycleListIndex(i, atMatches.length, 1));
@@ -1596,7 +1685,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         }
       }
     },
-    [isMobile, enterSendMode, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, enterSendMode, isStreaming, onSteer, onFollowUp, onAbort, extensionUiOpen, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1686,6 +1775,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     requestAnimationFrame(() => {
       ta.focus();
       ta.setSelectionRange(start + markdown.length, start + markdown.length);
+      scrollTextareaCaretIntoView(ta);
     });
   }, [compact, processImageFiles, updateAtQuery]);
 
@@ -1744,12 +1834,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [displayedSlashCommands.length]);
 
   useEffect(() => {
-    if (!slashMenuOpen) return;
+    if (!slashMenuOpen || extensionUiOpen) return;
     slashItemRefs.current[slashActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [slashActiveIndex, slashMenuOpen]);
+  }, [slashActiveIndex, slashMenuOpen, extensionUiOpen]);
 
+  // extensionUiOpen too: the menu mounts again once an extension's dialog closes.
   useLayoutEffect(() => {
-    if (!slashMenuOpen || slashQuery === null) {
+    if (!slashMenuOpen || slashQuery === null || extensionUiOpen) {
       setSlashMenuMaxHeight(null);
       return;
     }
@@ -1758,10 +1849,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     return subscribeUpwardMenuMaxHeight(menu, (nextHeight) => {
       setSlashMenuMaxHeight((current) => current === nextHeight ? current : nextHeight);
     });
-  }, [slashMenuOpen, slashQuery]);
+  }, [slashMenuOpen, slashQuery, extensionUiOpen]);
 
   useLayoutEffect(() => {
-    if (!atMenuOpen || atQuery === null) {
+    if (!atMenuOpen || atQuery === null || extensionUiOpen) {
       setAtMenuMaxHeight(null);
       return;
     }
@@ -1770,7 +1861,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     return subscribeUpwardMenuMaxHeight(menu, (nextHeight) => {
       setAtMenuMaxHeight((current) => current === nextHeight ? current : nextHeight);
     });
-  }, [atMenuOpen, atQuery]);
+  }, [atMenuOpen, atQuery, extensionUiOpen]);
 
   // Build model options: prefer modelList (has provider info), fallback to modelNames
   const modelOptions: ModelSelectorOption[] = (() => {
@@ -2043,7 +2134,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
         {/* Main input */}
         <div style={{ position: "relative", minWidth: 0 }}>
-          {historyMenuOpen && inputHistory.length > 0 && (
+          {historyMenuOpen && !extensionUiOpen && inputHistory.length > 0 && (
             <div
               ref={historyMenuRef}
               style={{
@@ -2130,7 +2221,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             </div>
           )}
-          {slashMenuOpen && slashQuery !== null && (
+          {slashMenuOpen && slashQuery !== null && !extensionUiOpen && (
             <div
               ref={slashMenuRef}
               style={{
@@ -2281,7 +2372,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             </div>
           )}
-          {atMenuOpen && atQuery !== null && (() => {
+          {atMenuOpen && atQuery !== null && !extensionUiOpen && (() => {
             const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
              const matchCountLabel = atMatches.length === 1 ? t("chat.match") : t("chat.matches", { count: atMatches.length });
             // With a truncated index, local results are provisional — the
@@ -2457,7 +2548,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             }}
           />
 
-          {isStreaming ? (
+          {isStreaming && !bashMode ? (
             <div style={{ display: "flex", alignItems: "stretch", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
               {onSideChat && (
                 <button
