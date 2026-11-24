@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { type SessionInfo } from "@/lib/types";
 import { listSessionFamilies, groupFamiliesByDay, isHiddenRelation, type SessionDayGroup } from "@/lib/session-family";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
+import { clearDraft } from "@/lib/draft-store";
 import { loadCollapsedDayGroups, saveCollapsedDayGroups, hasCollapseBeenSeeded, markCollapseSeeded } from "@/lib/session-day-collapse";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { isPlainActivation, sessionDeepLink } from "@/lib/session-links";
@@ -241,6 +242,8 @@ const RUNNING_SESSIONS_POLL_MS = 2500;
 // tile/card, so crossing the gap between them never blinks the card.
 const PROJECT_RAIL_TOOLTIP_HIDE_DELAY_MS = 160;
 const SESSION_DETAILS_HYDRATION_DELAY_MS = 750;
+// How long the running poll leaves an unknown list version to the first summary (a cold disk).
+const INITIAL_SUMMARY_WAIT_MS = 15_000;
 const EXPLORER_PANE_MIN_HEIGHT = 120;
 /** Project rail (signal-light column) width limits for drag resizing. */
 const PROJECT_RAIL_DEFAULT_WIDTH = 52;
@@ -620,6 +623,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
   // decide whether the list needs reloading, and no render reads it.
   const sessionListVersionRef = useRef<number | null>(null);
   const sessionLoadIdRef = useRef(0);
+  // While the first summary list is in flight, the running poll must not take the
+  // unknown list version for an invalidation and supersede it with a full scan.
+  // Bounded: a summary request that stalls (a dropped phone connection) must not
+  // keep the poll from loading the list forever.
+  const initialSummaryStartedAtRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
@@ -733,7 +741,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
   // virtualIndices) was dropped in favor of HEAD's day-group rendering.
   // getSessionListIndices stays exported for its unit tests.
 
-  const loadSessions = useCallback(async (showLoading = false, force = false, summary = false) => {
+  const loadSessions = useCallback(async (showLoading = false, force = false, summary = false): Promise<boolean> => {
     const loadId = ++sessionLoadIdRef.current;
     try {
       if (showLoading) setLoading(true);
@@ -747,9 +755,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
         runningSessionIds?: string[];
         completionNotificationSuppressedSessionIds?: string[];
       };
-      if (loadId !== sessionLoadIdRef.current) return;
+      if (loadId !== sessionLoadIdRef.current) return false;
       sessionListVersionRef.current = data.sessionListVersion;
       setAllSessions(data.sessions);
+      // A summary row whose file changed since the last scan is the only one
+      // without its details; the others were checked against their file's stat.
+      const needsDetails = data.sessions.some((session) => session.detailsPending === true);
       // Treat the fetched running set as an initial fallback only. Once the
       // lightweight poll is live, a slow session-list fetch cannot overwrite it.
       if (!runningPollAuthoritativeRef.current) {
@@ -777,8 +788,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
         if (sessionRefreshTimerRef.current) clearTimeout(sessionRefreshTimerRef.current);
         sessionRefreshTimerRef.current = setTimeout(() => setSessionRefreshDone(false), 2000);
       }
+      return needsDetails;
     } catch (e) {
       if (loadId === sessionLoadIdRef.current) setError(String(e));
+      return false;
     } finally {
       if (loadId === sessionLoadIdRef.current) setLoading(false);
     }
@@ -794,8 +807,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       // Header/stat metadata is enough to select the URL session and paint the
       // sidebar. Hydrate exact counts, names, and first messages once the
       // selected chat has had a chance to start loading.
-      void loadSessions(true, false, true).then(() => {
-        if (!active) return;
+      initialSummaryStartedAtRef.current = Date.now();
+      void loadSessions(true, false, true).then((needsDetails) => {
+        initialSummaryStartedAtRef.current = null;
+        if (!active || !needsDetails) return;
         detailsHydrationTimerRef.current = setTimeout(() => {
           detailsHydrationTimerRef.current = null;
           if (active) void loadSessions(false, true);
@@ -961,7 +976,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
         setRunningSessionDetails(data.runningSessionDetails ?? []);
         setAwaitingInputSessionIds((previous) => sameIdsOr(previous, data.awaitingInputSessionIds ?? []));
         setSubagentsActiveSessionIds((previous) => sameIdsOr(previous, data.subagentsActiveSessionIds ?? []));
-        if (data.sessionListVersion !== sessionListVersionRef.current) {
+        // The first summary may still be in flight (a cold disk): its version is
+        // unknown, not stale, so a full scan must not supersede it.
+        const summaryStartedAt = initialSummaryStartedAtRef.current;
+        const summaryInFlight = summaryStartedAt !== null && Date.now() - summaryStartedAt < INITIAL_SUMMARY_WAIT_MS;
+        if (!summaryInFlight && data.sessionListVersion !== sessionListVersionRef.current) {
           // Reuse the invalidated cache; forcing a scan would change the version again.
           await loadSessions();
         }
@@ -3560,7 +3579,9 @@ function SessionItem({
     setConfirmDelete(false);
     setDeleting(true);
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      // Drafts are kept in this browser's storage: they go with their sessions.
+      if (res.ok) clearDraft(session.id);
       onDeleted?.(session.id);
     } catch {
       setDeleting(false);

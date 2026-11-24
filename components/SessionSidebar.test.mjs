@@ -44,8 +44,36 @@ test("session windows stay valid after a project shrinks and before the viewport
   assert.equal(getSessionListIndices(2000, 0, 0).length, 28);
 });
 
-test("only Shift+click bypasses session deletion confirmation", () => {
-  assert.match(
+test("a deleted session's stored draft goes with it, only once the server deleted it", async () => {
+  const anchor = "}, [session.id, session.transient, onDeleted]);";
+  const start = source.indexOf("const performDelete = useCallback(async () => {");
+  const end = source.indexOf(anchor, start);
+  assert.ok(start !== -1 && end !== -1);
+  const body = source.slice(start, end + anchor.length)
+    .replace(/^const performDelete = useCallback\(async \(\) => \{/, "")
+    .replace(/\}, \[session\.id, session\.transient, onDeleted\]\);$/, "");
+  const code = ts.transpileModule(`(async () => { ${body} })`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  for (const ok of [true, false]) {
+    const cleared = [];
+    const deleted = [];
+    const performDelete = vm.runInNewContext(code, {
+      useCallback: (callback) => callback,
+      session: { id: "main", transient: false },
+      setConfirmDelete() {},
+      setDeleting() {},
+      fetch: async () => ({ ok }),
+      clearDraft: (id) => cleared.push(id),
+      onDeleted: (id) => deleted.push(id),
+    });
+    await performDelete();
+    assert.deepEqual(cleared, ok ? ["main"] : []);
+    assert.deepEqual(deleted, ["main"]);
+  }
+});
+
+test("only Shift+click bypasses session deletion confirmation", () => {  assert.match(
     sessionItemSource,
     /const handleDeleteClick[\s\S]*?if \(e\.shiftKey\) \{\s*void performDelete\(\);\s*\} else \{\s*setConfirmDelete\(true\);/,
   );

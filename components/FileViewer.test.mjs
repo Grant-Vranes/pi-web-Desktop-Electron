@@ -62,7 +62,7 @@ test("dispatches .drawio files to DrawioViewer before the text fallback", () => 
 
 test("markdown preview links carry PDF page fragments", () => {
   assert.match(source, /parsePdfPageFragment/);
-  assert.match(source, /onOpenFile\(linkedFile, parsePdfPageFragment\(href\) \?\? undefined\)/);
+  assert.match(source, /onOpenFileRef\.current\?\.\(linkedFile, parsePdfPageFragment\(href\) \?\? undefined\)/);
 });
 
 test("the diff view wraps when the viewer wraps, and the key reaches the diff", () => {

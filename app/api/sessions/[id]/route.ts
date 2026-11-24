@@ -20,7 +20,6 @@ import type { SessionEntry } from "@/lib/types";
 import { readSubagentRun, readSubagentSessionResources } from "@/lib/subagents";
 import { readSideRelation, sideOwnEntries } from "@/lib/side-session";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
-import { jsonResponse } from "@/lib/json-response";
 import { deleteSessions } from "@/lib/session-delete";
 import { attachTranscriptNotices, readSessionTranscriptNotices } from "@/lib/transcript-notices-server";
 
@@ -141,8 +140,7 @@ export async function GET(
       transient: !filePath || !existsSync(filePath),
     }]))[0] : null;
 
-    return perf?.attach(jsonResponse(
-      req,
+    return perf?.attach(NextResponse.json(
       {
         sessionId: id,
         filePath,
@@ -157,8 +155,7 @@ export async function GET(
         ...(toolNames !== undefined ? { toolNames } : {}),
         ...(wrapperRebuilt ? { wrapperRebuilt: true } : {}),
       },
-    )) ?? jsonResponse(
-      req,
+    )) ?? NextResponse.json(
       {
         sessionId: id,
         filePath,
